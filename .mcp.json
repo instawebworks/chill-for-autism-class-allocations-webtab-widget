@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "chill-zoho-crm": {
+      "type": "http",
+      "url": "https://zoho-crm-data-operations-7006387633.zohomcp.com.au/mcp/c8a6dc403e36148d1459c1aef9fc9cea/message"
+    }
+  }
+}

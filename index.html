@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Class Allocations</title>
+    <!--
+      Zoho Embedded App SDK, v1.0.6, vendored into public/vendor/.
+      The "Embeded" misspelling is Zoho's, not ours.
+
+      Served locally rather than from a CDN on purpose. The documented CDN host
+      live.zohostatic.com no longer resolves (NXDOMAIN), and the live host
+      live.zwidgets.com is a third party outside our control that would also need
+      a CSP entry. A dead script tag fails silently — window.ZOHO is simply
+      undefined and the widget idles forever with no error. Vendoring removes
+      that entire failure mode.
+
+      To refresh: curl -L https://live.zwidgets.com/js-sdk/1.0.6/ZohoEmbededAppSDK.min.js
+    -->
+    <script src="./vendor/ZohoEmbededAppSDK.min.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

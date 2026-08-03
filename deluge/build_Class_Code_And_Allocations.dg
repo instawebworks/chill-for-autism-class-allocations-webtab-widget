@@ -1,0 +1,265 @@
+/*
+ * Zoho CRM — Classes workflow function
+ * Fires on Class create/update.
+ *
+ * Builds the Class Code, keeps the Students Allocated subform's derived columns
+ * in step with their Admission lookup, maintains Seats_Allocated, and publishes
+ * a JSON snapshot of the roster into Allocation_Data_JSON.
+ *
+ * The JSON exists so the widget can read allocations through getRecords /
+ * getAllRecords. Subform rows are never returned by those calls — only
+ * getRecordById returns them — and fetching ~50 classes individually is not
+ * worth 50 round trips. This function already holds the rows in memory, so
+ * writing a snapshot costs nothing extra.
+ *
+ * Shape written to Allocation_Data_JSON:
+ *
+ *   {
+ *     "v": 1,
+ *     "count": 2,
+ *     "rows": [
+ *       {
+ *         "rowId":       "<subform row id>",   // lets the widget target one row
+ *         "admissionId": "<Admissions id>",    // the authoritative link
+ *         "admissionNo": "ADM-00004",
+ *         "studentId":   "<Students id>",      // for clash / duplicate checks
+ *         "studentName": "Trish Stewart",
+ *         "enrolmentNo": "ENR-1592"
+ *       }
+ *     ]
+ *   }
+ *
+ * An empty roster writes {"v":1,"count":0,"rows":[]} rather than being left
+ * blank, so the widget can tell "no one allocated" from "never populated".
+ *
+ * No timestamp is included on purpose: it would differ on every run, so the
+ * field would be rewritten each time the workflow fires even when nothing
+ * changed. Modified_Time on the Class already records when it last changed.
+ */
+void automation.build_Class_Code_And_Allocations(Int classId)
+{
+	SUB_API = "Students_Allocated";
+	JSON_API = "Allocation_Data_JSON";
+	JSON_VERSION = 1;
+	NONE = "-None-";
+	cls = zoho.crm.getRecordById("Classes",classId.toLong());
+	if(cls != null && !cls.isEmpty())
+	{
+		// ---------- STEP 1: the Class Code ----------
+		// program: "C" + first 3 letters after the first word, upper-cased.
+		programCode = "";
+		program = ifnull(cls.get("Program"),"").toString().trim();
+		if(program != "" && program != NONE)
+		{
+			tail = "";
+			idx = 0;
+			for each  word in program.toList(" ")
+			{
+				piece = word.trim();
+				if(idx > 0)
+				{
+					tail = tail + piece;
+				}
+				idx = idx + 1;
+			}
+			if(tail.length() >= 3)
+			{
+				programCode = "C" + tail.subString(0,3).toUpperCase();
+			}
+			else if(tail != "")
+			{
+				// One- or two-letter second word — take what there is.
+				programCode = "C" + tail.toUpperCase();
+			}
+		}
+		if(programCode == "")
+		{
+			info "Class " + classId + ": Program is blank or has no second word ('" + program + "') — program segment omitted.";
+		}
+		// location: the linked Locations record's code, used as-is.
+		locCode = "";
+		locLookup = cls.get("Loction");
+		if(locLookup != null && locLookup.get("id") != null)
+		{
+			loc = zoho.crm.getRecordById("Locations",locLookup.get("id").toString().toLong());
+			if(loc != null && !loc.isEmpty())
+			{
+				locCode = ifnull(loc.get("Location_Code"),"").toString().trim();
+			}
+		}
+		if(locCode == "")
+		{
+			info "Class " + classId + ": no Location / Location Code — location segment omitted.";
+		}
+		// term: "T" + the number out of "Term 4".
+		termCode = "";
+		termRaw = ifnull(cls.get("Select_Term"),"").toString().trim();
+		if(termRaw != "" && termRaw != NONE)
+		{
+			termNum = termRaw.replaceAll("Term","").replaceAll(" ","").trim();
+			if(termNum != "")
+			{
+				termCode = "T" + termNum;
+			}
+		}
+		// day: the weekday picklist shortened to 3 letters ("Monday" -> "MON").
+		dayCode = "";
+		dayRaw = ifnull(cls.get("Class_Day"),"").toString().trim();
+		if(dayRaw != "" && dayRaw != NONE)
+		{
+			if(dayRaw.length() >= 3)
+			{
+				dayCode = dayRaw.subString(0,3).toUpperCase();
+			}
+			else
+			{
+				dayCode = dayRaw.toUpperCase();
+			}
+		}
+		// time: strip the spaces, the separating hyphen and the colons.
+		timeCode = "";
+		timeRaw = ifnull(cls.get("Class_Time"),"").toString().trim();
+		if(timeRaw != "" && timeRaw != NONE)
+		{
+			timeCode = timeRaw.replaceAll(" ","").replaceAll("-","").replaceAll(":","");
+		}
+		parts = List();
+		if(programCode != "")
+		{
+			parts.add(programCode);
+		}
+		if(locCode != "")
+		{
+			parts.add(locCode);
+		}
+		if(termCode != "")
+		{
+			parts.add(termCode);
+		}
+		if(dayCode != "")
+		{
+			parts.add(dayCode);
+		}
+		if(timeCode != "")
+		{
+			parts.add(timeCode);
+		}
+		classCode = parts.toString("-");
+		// ---------- STEPS 2 & 3: the subform, and the JSON snapshot ----------
+		rows = ifnull(cls.get(SUB_API),List());
+		seatsAllocated = rows.size();
+		newRows = List();
+		jsonRows = List();
+		rowsChanged = false;
+		for each  row in rows
+		{
+			out = Map();
+			rowId = ifnull(row.get("id"),"").toString();
+			if(rowId != "")
+			{
+				out.put("id",rowId);
+			}
+			oldStudent = ifnull(row.get("Student_Name"),"").toString().trim();
+			oldEnrol = ifnull(row.get("Enrolment_No"),"").toString().trim();
+			studentName = oldStudent;
+			enrolNo = oldEnrol;
+			// Extra identifiers for the snapshot only — not stored on the row.
+			admIdOut = "";
+			admNoOut = "";
+			stuIdOut = "";
+			admLookup = row.get("Admission");
+			if(admLookup != null && admLookup.get("id") != null)
+			{
+				admId = admLookup.get("id").toString();
+				admIdOut = admId;
+				out.put("Admission",admId);
+				adm = zoho.crm.getRecordById("Admissions",admId.toLong());
+				if(adm != null && !adm.isEmpty())
+				{
+					admNoOut = ifnull(adm.get("Name"),"").toString().trim();
+					stuLookup = adm.get("Student_Name");
+					if(stuLookup != null && stuLookup.get("name") != null)
+					{
+						studentName = stuLookup.get("name").toString().trim();
+					}
+					if(stuLookup != null && stuLookup.get("id") != null)
+					{
+						stuIdOut = stuLookup.get("id").toString();
+					}
+					enrLookup = adm.get("Enrollment");
+					if(enrLookup != null && enrLookup.get("name") != null)
+					{
+						enrolNo = enrLookup.get("name").toString().trim();
+					}
+				}
+				else
+				{
+					info "Class " + classId + ": Admission " + admId + " not readable — row left as it was.";
+				}
+			}
+			else
+			{
+				info "Class " + classId + ": a Students Allocated row has no Admission — row left as it was.";
+			}
+			out.put("Student_Name",studentName);
+			out.put("Enrolment_No",enrolNo);
+			if(studentName != oldStudent || enrolNo != oldEnrol)
+			{
+				rowsChanged = true;
+			}
+			newRows.add(out);
+			// A row with no Admission is still a row: it occupies a seat, so it
+			// belongs in the snapshot with empty identifiers rather than dropped.
+			jsonRow = Map();
+			jsonRow.put("rowId",rowId);
+			jsonRow.put("admissionId",admIdOut);
+			jsonRow.put("admissionNo",admNoOut);
+			jsonRow.put("studentId",stuIdOut);
+			jsonRow.put("studentName",studentName);
+			jsonRow.put("enrolmentNo",enrolNo);
+			jsonRows.add(jsonRow);
+		}
+		snapshot = Map();
+		snapshot.put("v",JSON_VERSION);
+		snapshot.put("count",seatsAllocated);
+		snapshot.put("rows",jsonRows);
+		newJson = snapshot.toString();
+		// ---------- write back ----------
+		currentCode = ifnull(cls.get("Name"),"").toString().trim();
+		currentSeats = ifnull(cls.get("Seats_Allocated"),-1).toLong();
+		currentJson = ifnull(cls.get(JSON_API),"").toString().trim();
+		upd = Map();
+		if(classCode != "" && classCode != currentCode)
+		{
+			upd.put("Name",classCode);
+		}
+		if(seatsAllocated != currentSeats)
+		{
+			upd.put("Seats_Allocated",seatsAllocated);
+		}
+		if(rowsChanged && newRows.size() > 0)
+		{
+			upd.put(SUB_API,newRows);
+		}
+		if(newJson != currentJson)
+		{
+			upd.put(JSON_API,newJson);
+		}
+		if(upd.size() > 0)
+		{
+			// Empty trigger list = do not re-fire this rule on our own update.
+			opts = Map();
+			opts.put("trigger",List());
+			updResp = zoho.crm.updateRecord("Classes",classId.toLong(),upd,opts);
+			info "Class " + classId + " -> code '" + classCode + "', seats allocated " + seatsAllocated + ", rows " + newRows.size() + ", json " + newJson.length() + " chars. Update: " + updResp.toString();
+		}
+		else
+		{
+			info "Class " + classId + ": code '" + currentCode + "', seats allocated " + currentSeats + " — already up to date, nothing written.";
+		}
+	}
+	else
+	{
+		info "Class " + classId + " not readable.";
+	}
+}

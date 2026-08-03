@@ -1,0 +1,20 @@
+{
+  "locale": ["en"],
+  "csp": "",
+  "storage": false,
+  "whiteListedDomains": ["https://www.zohoapis.com.au"],
+  "cspDomains": {
+    "connect-src": ["https://www.zohoapis.com.au"]
+  },
+  "modules": {
+    "widgets": [
+      {
+        "location": "top.band",
+        "name": "Class Allocations",
+        "url": "/index.html",
+        "description": "Allocate students to classes for Chill for Autism."
+      }
+    ]
+  },
+  "config": []
+}

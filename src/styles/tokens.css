@@ -1,0 +1,71 @@
+/**
+ * Design tokens — single source of truth for the widget's visual language.
+ *
+ * The widget is dark-only, matching the Chill program schedule artwork: a deep
+ * navy field with saturated program colours sitting on top. No light theme —
+ * a single committed palette keeps contrast predictable, and the programme
+ * colours below were picked to work on navy and nothing else.
+ *
+ * Rule: components never hardcode a colour. New colour → new token here first.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* --- Surfaces --------------------------------------------------------- */
+  --bg: #0a2445;
+  --bg-deep: #071b35;
+  --surface: #0f2d53;
+  --surface-2: #143764;
+  --surface-3: #1a4275;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --rule: rgba(255, 255, 255, 0.22);
+
+  /* --- Text ------------------------------------------------------------- */
+  --fg: #ffffff;
+  --fg-muted: #a9c2de;
+  --fg-subtle: #6f8fb5;
+  --fg-on-accent: #ffffff;
+
+  /* --- Brand ------------------------------------------------------------ */
+  --brand: #1b9ce5;
+  --brand-strong: #38b0f0;
+  --accent: #1560bd;
+
+  /* --- Status ----------------------------------------------------------- */
+  --ok: #3ec98a;
+  --warn: #f5b83d;
+  --danger: #ef5a5a;
+
+  /* --- Skeleton --------------------------------------------------------- */
+  --skeleton: rgba(255, 255, 255, 0.07);
+  --skeleton-strong: rgba(255, 255, 255, 0.11);
+  --skeleton-sheen: rgba(255, 255, 255, 0.13);
+}
+
+/**
+ * Programme colours, lifted from the Term 4 schedule artwork.
+ * Exposed as tokens so the timetable and any legend stay in agreement.
+ */
+:root {
+  --p-plus: #159fdb;
+  --p-foundation: #1560bd;
+  --p-write: #8cc63f;
+  --p-art: #ffd34e;
+  --p-no-problem: #8b7bd8;
+  --p-screen: #7b2033;
+  --p-sport: #f2836b;
+  --p-stage: #e4187e;
+  --p-tunes: #16a085;
+  --p-neuromance: #c0272d;
+  --p-life: #a8c6e8;
+  --p-money: #0e6b3d;
+  --p-moves: #9b4fa0;
+  --p-grill: #e8202a;
+  --p-mindfulness: #ff7bc0;
+  --p-robotics: #f57c00;
+  --p-out: #4aa3a0;
+  --p-default: #2b5f96;
+}

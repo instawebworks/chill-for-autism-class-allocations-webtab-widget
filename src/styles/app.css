@@ -1,0 +1,203 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/**
+ * `@theme inline` maps our CSS variables into Tailwind's theme, so utilities
+ * like `bg-surface` or `text-muted` resolve through the variable rather than a
+ * baked literal.
+ */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-deep: var(--bg-deep);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-rule: var(--rule);
+
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-subtle: var(--fg-subtle);
+
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-accent: var(--accent);
+
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+
+  --color-skeleton: var(--skeleton);
+  --color-skeleton-strong: var(--skeleton-strong);
+
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  /**
+   * Hard rule: the page itself never scrolls.
+   *
+   * The widget fills its iframe exactly and any overflow is handled by an inner
+   * container that scrolls on its own. Locking overflow here means a stray tall
+   * child produces a scrollbar inside a panel — where it belongs — instead of
+   * silently making the whole board scrollable.
+   */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background: var(--bg);
+  }
+
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Slim scrollbars for the panels that do scroll. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand-strong);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer utilities {
+  /**
+   * Skeleton sheen. One shared keyframe rather than per-element animation so
+   * every placeholder on screen sweeps in step — staggered shimmers read as
+   * jitter, a synchronised sweep reads as a single surface loading.
+   */
+  @keyframes sheen {
+    0% {
+      transform: translateX(-100%);
+    }
+    60%,
+    100% {
+      transform: translateX(200%);
+    }
+  }
+
+  @keyframes pulse-soft {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--skeleton);
+  }
+
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--skeleton-sheen) 50%,
+      transparent 100%
+    );
+    animation: sheen 2.1s var(--ease-out-soft) infinite;
+  }
+
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .animate-rise {
+    animation: rise 460ms var(--ease-out-soft) both;
+  }
+
+  .animate-fade {
+    animation: fade 160ms ease-out both;
+  }
+
+  .animate-pop {
+    animation: pop 200ms var(--ease-out-soft) both;
+  }
+
+  .animate-pulse-soft {
+    animation: pulse-soft 2.4s ease-in-out infinite;
+  }
+
+  /* One switch calms every decorative animation at once. */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after,
+    .animate-rise,
+    .animate-pulse-soft,
+    .animate-fade,
+    .animate-pop {
+      animation: none;
+    }
+    .skeleton {
+      background: var(--skeleton-strong);
+    }
+    *,
+    *::before,
+    *::after {
+      transition-duration: 1ms !important;
+    }
+  }
+}
