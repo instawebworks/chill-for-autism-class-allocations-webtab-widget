@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useMemo, useState } from 'react'
 import { useData } from '../crm/DataProvider.jsx'
 import { admissionLocationId, classLocationId, scopeToLocation } from '../domain/locations.js'
 
@@ -22,17 +22,25 @@ const WorkspaceContext = createContext(null)
 export function WorkspaceProvider({ children }) {
   const { targetTerm, targetTermBasis, locations, classes, admissions } = useData()
 
-  // Preselect the first location. With a single site this is the only choice;
-  // with several it is a defined starting point rather than an empty board.
-  const [locationId, setLocationId] = useState(() => locations[0]?.id ?? null)
+  // What the user has asked for, which is not necessarily what exists.
+  const [requestedLocationId, setRequestedLocationId] = useState(null)
 
-  // Keep the selection pointing at something real if the list ever changes.
-  useEffect(() => {
-    if (locations.length === 0) return
-    if (!locations.some((l) => l.id === locationId)) {
-      setLocationId(locations[0].id)
-    }
-  }, [locations, locationId])
+  /**
+   * The location actually in force, resolved during render rather than
+   * corrected afterwards by an effect.
+   *
+   * The effect version worked but had a real flaw: when the location list
+   * changed under a stale selection, the component first rendered a board
+   * scoped to a site that no longer exists, and only then re-rendered with the
+   * fallback. Deriving it means there is no frame in which the scope is wrong.
+   *
+   * Null only when the org has no locations at all — with one site this is
+   * always that site, which is the defined starting point rather than an empty
+   * board.
+   */
+  const locationId = locations.some((l) => l.id === requestedLocationId)
+    ? requestedLocationId
+    : (locations[0]?.id ?? null)
 
   const value = useMemo(() => {
     const selectedLocation = locations.find((l) => l.id === locationId) ?? null
@@ -40,10 +48,10 @@ export function WorkspaceProvider({ children }) {
     const scopedClasses = scopeToLocation(classes, locationId, classLocationId)
     const scopedAdmissions = scopeToLocation(admissions, locationId, admissionLocationId)
 
-    // "Unallocated" is simply Allocated? being unticked. Compared against `true`
-    // rather than negated, because the field reads null on records created
-    // before it existed, and null is not the same as "definitely placed".
-    const unallocatedAdmissions = scopedAdmissions.matched.filter((a) => a.Allocated !== true)
+    // Note: who is "awaiting placement" is deliberately NOT derived here.
+    // It depends on the session's unsaved edits, which live one layer down in
+    // AllocationsProvider — see WaitingPanel. Keeping a second, flag-based
+    // definition alongside it would guarantee the two eventually disagree.
 
     return {
       targetTerm,
@@ -51,10 +59,9 @@ export function WorkspaceProvider({ children }) {
       locations,
       locationId,
       selectedLocation,
-      setLocationId,
+      setLocationId: setRequestedLocationId,
       classes: scopedClasses.matched,
       admissions: scopedAdmissions.matched,
-      unallocatedAdmissions,
       // Records with no location at all: excluded from the board, but reported
       // so a class that is simply missing its site does not disappear silently.
       classesWithoutLocation: scopedClasses.unattributed,

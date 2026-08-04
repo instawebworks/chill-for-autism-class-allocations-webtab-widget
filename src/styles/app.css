@@ -182,6 +182,39 @@
     animation: pulse-soft 2.4s ease-in-out infinite;
   }
 
+  /**
+   * Spring-load countdown on a class pill during a drag. Linear on purpose —
+   * it is a timer, and any easing would misreport how much of the wait is left.
+   */
+  @keyframes dwell-fill {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  .animate-dwell {
+    transform-origin: left center;
+    animation: dwell-fill var(--dwell-duration, 700ms) linear forwards;
+  }
+
+  @keyframes spin-slow {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /**
+   * The save spinner. Exempt from the reduced-motion rule below on purpose:
+   * it is not decoration, it is the only sign that a request is still in
+   * flight, and freezing it would say the opposite of what is happening.
+   */
+  .animate-spin-slow {
+    animation: spin-slow 900ms linear infinite;
+  }
+
   /* One switch calms every decorative animation at once. */
   @media (prefers-reduced-motion: reduce) {
     .skeleton::after,
@@ -190,6 +223,13 @@
     .animate-fade,
     .animate-pop {
       animation: none;
+    }
+    /* Held at zero rather than simply unanimated: a bar that jumped to full
+       would claim the wait was over when it has not started. The ring around
+       the pill still says which class is targeted. */
+    .animate-dwell {
+      animation: none;
+      transform: scaleX(0);
     }
     .skeleton {
       background: var(--skeleton-strong);

@@ -109,3 +109,44 @@ export function rosterHasAdmission(cls, admissionId) {
   if (!admissionId) return false
   return rosterOf(cls).some((row) => row.admissionId === admissionId)
 }
+
+/**
+ * Fill in a roster entry's descriptive fields.
+ *
+ * A pending entry is only `{ rowId, admissionId }` — enough to identify a row,
+ * not enough to draw one or to write a snapshot. This resolves the rest.
+ *
+ * The class's existing snapshot wins where it has an answer: those values were
+ * written by the workflow from the Admission record, so they are exactly what it
+ * would write again. The Admissions record is the fallback for a row being
+ * placed now, which has no prior snapshot entry to copy.
+ *
+ * Shared by the dialog (to render a row) and the payload builder (to publish
+ * one) so the two can never disagree about who a row belongs to.
+ *
+ * @param {{rowId: string|null, admissionId: string|null}} entry
+ * @param {Map<string, RosterRow>} priorByRowId  existing snapshot rows, by rowId
+ * @param {Map<string, object>}    admissionsById
+ */
+export function resolveRosterRow(entry, priorByRowId, admissionsById) {
+  const prior = entry?.rowId ? priorByRowId.get(entry.rowId) : null
+  const adm = entry?.admissionId ? admissionsById.get(entry.admissionId) : null
+
+  return {
+    rowId: entry?.rowId ?? '',
+    admissionId: entry?.admissionId ?? '',
+    admissionNo: prior?.admissionNo ?? adm?.Name ?? '',
+    studentId: prior?.studentId ?? adm?.Student_Name?.id ?? '',
+    studentName: prior?.studentName ?? adm?.Student_Name?.name ?? '',
+    enrolmentNo: prior?.enrolmentNo ?? adm?.Enrollment?.name ?? '',
+  }
+}
+
+/** Existing snapshot rows keyed by rowId, for `resolveRosterRow`. */
+export function priorRowsByRowId(cls) {
+  return new Map(
+    parseRoster(cls)
+      .rows.filter((row) => row.rowId)
+      .map((row) => [row.rowId, row]),
+  )
+}

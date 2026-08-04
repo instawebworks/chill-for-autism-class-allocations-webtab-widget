@@ -1,5 +1,5 @@
-import { useState } from 'react'
 import { DAYS, groupForBoard } from '../domain/schedule.js'
+import { useBoard } from '../state/Board.jsx'
 import ClassPill from './ClassPill.jsx'
 import ClassDialog from './ClassDialog.jsx'
 
@@ -65,10 +65,12 @@ function Sessions({ classes, onOpen }) {
 export default function ScheduleBoard({ classes, orphaned = [] }) {
   const { grid, unscheduled } = groupForBoard(classes)
 
+  // Which dialog is open lives in the board context, not here: a drag that
+  // springs a class open starts in the waiting panel, so the two components
+  // that open dialogs are in different subtrees and need one shared answer.
   // Held by id rather than by object so the open dialog follows the record if
   // the class list is refetched underneath it.
-  const [openId, setOpenId] = useState(null)
-  const openClass = classes.find((c) => c.id === openId) ?? null
+  const { openClass, showClass, closeClass } = useBoard()
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -86,7 +88,7 @@ export default function ScheduleBoard({ classes, orphaned = [] }) {
           {/* Row 2 — morning */}
           {DAYS.map((day, i) => (
             <div key={`m-${day}`} className={cellClass(i)}>
-              <Sessions classes={grid[day].Morning} onOpen={(c) => setOpenId(c.id)} />
+              <Sessions classes={grid[day].Morning} onOpen={(c) => showClass(c.id)} />
             </div>
           ))}
 
@@ -100,7 +102,7 @@ export default function ScheduleBoard({ classes, orphaned = [] }) {
           {/* Row 4 — afternoon */}
           {DAYS.map((day, i) => (
             <div key={`a-${day}`} className={cellClass(i)}>
-              <Sessions classes={grid[day].Afternoon} onOpen={(c) => setOpenId(c.id)} />
+              <Sessions classes={grid[day].Afternoon} onOpen={(c) => showClass(c.id)} />
             </div>
           ))}
         </div>
@@ -125,7 +127,15 @@ export default function ScheduleBoard({ classes, orphaned = [] }) {
         </div>
       )}
 
-      <ClassDialog cls={openClass} open={!!openClass} onClose={() => setOpenId(null)} />
+      {/*
+        Mounted only while a class is open — NOT rendered always with an `open`
+        flag. The dialog registers itself as a drop target, and a drop target
+        registered while its element does not exist is measured once as nothing
+        and never re-measured, because the set of targets has not changed. It
+        then sits there with no rectangle, so the drop silently misses. Tying
+        the registration to the element's own lifetime is what keeps it real.
+      */}
+      {openClass && <ClassDialog cls={openClass} onClose={closeClass} />}
     </div>
   )
 }

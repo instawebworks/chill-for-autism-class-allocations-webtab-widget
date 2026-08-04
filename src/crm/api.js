@@ -169,10 +169,98 @@ export async function getFields(module) {
   return res?.fields ?? []
 }
 
-export async function updateRecord(module, id, payload) {
-  return api().updateRecord({ Entity: module, RecordID: id, APIData: payload })
+/**
+ * Update one record.
+ *
+ * `RecordID` is deliberately not passed, because the SDK ignores it. From its
+ * source, updateRecord reads only Entity, APIData and Trigger:
+ *
+ *   updateRecord: function (a) {
+ *     var d = a.Entity, e = a.APIData
+ *     e.trigger = a.Trigger
+ *     return c({ category: 'UPDATE', type: 'RECORD', Entity: d, APIData: e })
+ *   }
+ *
+ * So the id has to travel *inside* APIData or the host has nothing to identify.
+ * The previous signature accepted an `id` argument and quietly dropped it,
+ * working only because every payload happened to carry its own `id`. Merging it
+ * here makes that guaranteed rather than lucky.
+ *
+ * The payload is copied rather than passed through: the SDK assigns `trigger`
+ * onto whatever object it is handed, and mutating the caller's payload would be
+ * a nasty surprise for anything that reuses it.
+ *
+ * @param {string[]} [opts.trigger] Automations to run — e.g. ['workflow'].
+ *   Omitted means Zoho's default, which is that everything fires. Allocation
+ *   writes want exactly that: the Classes workflow has to rerun to rebuild the
+ *   roster snapshot. Pass [] only to suppress deliberately, as the backfills did.
+ */
+export async function updateRecord(module, id, payload, { trigger } = {}) {
+  const APIData = { ...payload, id: String(id ?? payload?.id ?? '') }
+  if (!APIData.id) throw new Error(`updateRecord(${module}): no record id supplied.`)
+
+  return withTimeout(
+    api().updateRecord({
+      Entity: module,
+      APIData,
+      ...(trigger ? { Trigger: trigger } : {}),
+    }),
+    { ms: 30000, label: `update ${module} ${APIData.id}` },
+  )
 }
 
 export async function insertRecord(module, payload) {
   return api().insertRecord({ Entity: module, APIData: payload })
+}
+
+function functions() {
+  const f = window.ZOHO?.CRM?.FUNCTIONS
+  if (!f) throw new Error('ZOHO.CRM.FUNCTIONS unavailable — called outside CRM?')
+  return f
+}
+
+/**
+ * Run a published Deluge function and hand back its parsed result.
+ *
+ * This is how the widget writes. The SDK has no bulk update — only
+ * `updateRecord`, one record per postMessage round trip — so a save touching
+ * several classes and their admissions would be a dozen independent calls, each
+ * able to fail on its own. A function takes the whole batch at once, and writes
+ * subforms from Deluge, where they are known to work.
+ *
+ * The response is the standard function-execution envelope:
+ *
+ *   { code: 'success',
+ *     details: { output: '<the function\'s return value, as a string>',
+ *                userMessage: [ ...info lines... ] },
+ *     message: 'function executed successfully' }
+ *
+ * `output` is a string even when the function returns JSON, so it is parsed
+ * here rather than in every caller. Note that `code: 'success'` only means the
+ * function *ran* — whether the records were written is in the parsed output,
+ * which is why both functions report per-record results.
+ */
+export async function executeFunction(name, args = {}, { ms = 60000 } = {}) {
+  const res = await withTimeout(functions().execute(name, args), {
+    ms,
+    label: `function ${name}`,
+  })
+
+  if (res?.code && res.code !== 'success') {
+    // The one worth recognising by name: arguments travel in the query string,
+    // so an oversized payload is rejected before the function ever runs.
+    if (res.code === 'BODY_SIZE_REACHED') {
+      throw new Error(`${name}: payload too large for one call (${res.code}).`)
+    }
+    throw new Error(`${name}: ${res.code}${res.message ? ` — ${res.message}` : ''}`)
+  }
+
+  const output = res?.details?.output ?? res?.output
+  if (typeof output !== 'string') return output ?? res
+
+  try {
+    return JSON.parse(output)
+  } catch {
+    throw new Error(`${name}: returned output that is not JSON — ${output.slice(0, 180)}`)
+  }
 }

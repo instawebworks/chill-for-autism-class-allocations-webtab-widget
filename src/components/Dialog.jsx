@@ -17,7 +17,13 @@ import { useEffect, useRef } from 'react'
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
 
-export default function Dialog({ open, onClose, labelledBy, children, className = '' }) {
+/**
+ * `dropRef` lets a caller observe the panel element as well — the allocation
+ * dialog registers it as a drag-and-drop target. It is merged with the internal
+ * ref rather than replacing it, because focus management still needs its own
+ * handle on the same node.
+ */
+export default function Dialog({ open, onClose, labelledBy, children, className = '', dropRef }) {
   const panelRef = useRef(null)
   const restoreTo = useRef(null)
 
@@ -73,7 +79,10 @@ export default function Dialog({ open, onClose, labelledBy, children, className 
         aria-hidden="true"
       />
       <div
-        ref={panelRef}
+        ref={(node) => {
+          panelRef.current = node
+          if (typeof dropRef === 'function') dropRef(node)
+        }}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}

@@ -1,44 +1,44 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useId, useMemo } from 'react'
+import { useDroppable } from '@dnd-kit/core'
 import Dialog from './Dialog.jsx'
 import Checkbox from './Checkbox.jsx'
 import { parseRoster } from '../domain/allocations.js'
 import { capacityOf, lookupName } from '../domain/classes.js'
 import { programLabel } from '../domain/schedule.js'
 import { shadeForWhiteText } from '../domain/colour.js'
+import { evaluateAllocation } from '../domain/eligibility.js'
+import { useAllocations } from '../state/Allocations.jsx'
+import { DIALOG_DROP_ID, useBoard } from '../state/Board.jsx'
 
 /**
- * The students currently allocated to one class.
+ * The students allocated to one class.
  *
- * Every row starts ticked. What the ticks do is not wired up yet — the state is
- * held here and surfaced through `onSelectionChange` so the action can be added
- * without restructuring anything.
+ * Un-ticking a student un-allocates them: the row leaves this list immediately
+ * and their card reappears in the waiting panel, ready to be placed again.
+ * Nothing is written to CRM — the change is held until Save.
  *
- * A roster row is keyed by its subform `rowId`, which is what identifies the row
- * to CRM for any later update. `admissionId` is the fallback for the
- * theoretically-possible row that has no id yet.
+ * The list therefore renders the *pending* roster rather than the loaded one.
+ * Undo is not a second click here but the card on the left, which is why the
+ * row can safely disappear.
+ *
+ * Every visible row is by definition still allocated, so each checkbox is drawn
+ * ticked; the tick is the "in this class" state and clearing it is the action.
  */
 
-function rowKey(row, index) {
-  return row.rowId ?? row.admissionId ?? `row-${index}`
-}
-
-export default function ClassDialog({ cls, open, onClose, onSelectionChange }) {
+/**
+ * Mounted only while a class is open — see the call site in ScheduleBoard. The
+ * `useDroppable` registration below must not outlive the element it describes.
+ */
+export default function ClassDialog({ cls, onClose }) {
   const titleId = useId()
+  const { deallocate, rosterRowsFor } = useAllocations()
+  const { isDragging, activeAdmission } = useBoard()
+  // The whole panel is the drop target, not just the list: once the dialog has
+  // sprung open the user is already moving toward it, and asking them to find a
+  // smaller zone inside it would waste the gesture.
+  const { setNodeRef, isOver } = useDroppable({ id: DIALOG_DROP_ID })
   const roster = useMemo(() => (cls ? parseRoster(cls) : null), [cls])
-  const rows = roster?.rows ?? []
-
-  // Everyone selected on open, and reset whenever a different class is opened —
-  // without the reset, ticks from the last class would carry over.
-  const [selected, setSelected] = useState(() => new Set())
-  useEffect(() => {
-    if (!open || !cls) return
-    setSelected(new Set(rows.map(rowKey)))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, cls?.id])
-
-  useEffect(() => {
-    onSelectionChange?.(selected)
-  }, [selected, onSelectionChange])
+  const rows = cls ? rosterRowsFor(cls) : []
 
   if (!cls) return null
 
@@ -47,17 +47,35 @@ export default function ClassDialog({ cls, open, onClose, onSelectionChange }) {
   const header = shadeForWhiteText(cls.Class_Color_Code)
   const capacity = capacityOf(cls)
 
-  const toggle = (key) =>
-    setSelected((prev) => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
+  // The same verdict the drop itself will apply, so the zone can never invite a
+  // drop that is about to be refused.
+  // `rows` is already this class's pending roster, so it is the roster the rule
+  // needs — no second lookup, and no chance of the two disagreeing.
+  const verdict = activeAdmission
+    ? evaluateAllocation({ cls, admission: activeAdmission, roster: rows })
+    : null
+  const blocked = verdict != null && !verdict.ok
 
-  const allSelected = rows.length > 0 && selected.size === rows.length
+  const removeAll = () => {
+    for (const row of rows) {
+      if (row.admissionId) deallocate(cls, row.admissionId)
+    }
+  }
 
   return (
-    <Dialog open={open} onClose={onClose} labelledBy={titleId}>
+    <Dialog
+      open
+      onClose={isDragging ? () => {} : onClose}
+      labelledBy={titleId}
+      dropRef={setNodeRef}
+      className={
+        isDragging
+          ? `ring-2 ring-offset-2 ring-offset-transparent ${
+              isOver ? 'ring-brand-strong' : 'ring-brand/40'
+            }`
+          : ''
+      }
+    >
       {/* Header carries the programme colour so it is obvious which pill was
           opened, without repeating the whole board's context. */}
       <header
@@ -93,14 +111,9 @@ export default function ClassDialog({ cls, open, onClose, onSelectionChange }) {
       </header>
 
       <div className="border-line bg-surface-2 flex shrink-0 items-baseline justify-between gap-2 border-y px-5 py-2.5">
-        <p className="text-fg text-[12px] font-semibold">
-          Allocated students
-          {rows.length > 0 && (
-            <span className="text-subtle ml-1.5 font-normal">
-              {selected.size} of {rows.length} selected
-            </span>
-          )}
-        </p>
+        <p className="text-fg text-[12px] font-semibold">Allocated students</p>
+        {/* Seats count the pending roster, not the loaded one, so the number
+            drops the instant a student is un-allocated. */}
         <p className="text-muted shrink-0 text-[11px] font-bold tabular-nums">
           {rows.length}/{capacity} seats
         </p>
@@ -127,45 +140,70 @@ export default function ClassDialog({ cls, open, onClose, onSelectionChange }) {
           </p>
         </div>
       ) : (
-        <ul className="min-h-0 flex-1 divide-y divide-[color:var(--border)] overflow-y-auto">
-          {rows.map((row, i) => {
-            const key = rowKey(row, i)
-            const isOn = selected.has(key)
-            return (
-              <li key={key}>
-                {/* Name and admission number share one line, name left and
-                    number right. Down the list the numbers form a single
-                    right-hand column, and each student is one row instead of
-                    two — the same reason the waiting-list cards were folded. */}
-                <label className="hover:bg-surface-2 flex cursor-pointer items-center gap-3 px-5 py-2.5 transition-colors">
-                  <Checkbox
-                    checked={isOn}
-                    onChange={() => toggle(key)}
-                    label={`Select ${row.studentName ?? 'student'}`}
-                  />
-                  <span className="text-fg min-w-0 flex-1 truncate text-[13px] font-medium">
-                    {row.studentName ?? 'Unnamed student'}
-                  </span>
-                  <span className="text-muted shrink-0 font-mono text-[12px] font-bold">
-                    {row.admissionNo ?? '—'}
-                  </span>
-                </label>
-              </li>
-            )
-          })}
+        <ul className="divide-line min-h-0 flex-1 divide-y overflow-y-auto">
+          {rows.map((row) => (
+            <li key={row.key}>
+              {/* Name and admission number share one line, name left and
+                  number right. Down the list the numbers form a single
+                  right-hand column, and each student is one row instead of
+                  two — the same reason the waiting-list cards were folded. */}
+              <label className="hover:bg-surface-2 flex cursor-pointer items-center gap-3 px-5 py-2.5 transition-colors">
+                {/* Always ticked: an unticked row would have left the list. */}
+                <Checkbox
+                  checked
+                  onChange={() => row.admissionId && deallocate(cls, row.admissionId)}
+                  label={`Un-allocate ${row.studentName || 'this student'} from ${programLabel(cls.Program)}`}
+                />
+                <span className="text-fg min-w-0 flex-1 truncate text-[13px] font-medium">
+                  {row.studentName || 'Unnamed student'}
+                </span>
+                <span className="text-muted shrink-0 font-mono text-[12px] font-bold">
+                  {row.admissionNo || '—'}
+                </span>
+              </label>
+            </li>
+          ))}
         </ul>
+      )}
+
+      {/* Where the card lands. Shown only mid-drag, and only as a target — the
+          panel as a whole accepts the drop, so this is a signpost rather than a
+          hit area the user has to aim at. */}
+      {isDragging && (
+        <div className="border-line shrink-0 border-t px-5 py-3">
+          {/* States the verdict up front rather than accepting the drop and
+              explaining afterwards. The reason is the rule's own wording, so it
+              matches the banner the refusal would raise. */}
+          <div
+            className={`flex items-center justify-center rounded-xl border border-dashed px-3 py-3 text-center text-[12px] font-medium transition-colors ${
+              blocked
+                ? verdict.tone === 'danger'
+                  ? 'border-danger/60 bg-danger/10 text-danger'
+                  : verdict.tone === 'warn'
+                    ? 'border-warn/60 bg-warn/10 text-warn'
+                    : 'border-line-strong text-muted'
+                : isOver
+                  ? 'border-brand-strong bg-brand/15 text-brand-strong'
+                  : 'border-line-strong text-subtle'
+            }`}
+          >
+            {blocked
+              ? verdict.title
+              : isOver
+                ? 'Release to allocate'
+                : 'Drop here to allocate'}
+          </div>
+        </div>
       )}
 
       {rows.length > 1 && (
         <footer className="border-line bg-surface-2 shrink-0 border-t px-5 py-2.5">
           <button
             type="button"
-            onClick={() =>
-              setSelected(allSelected ? new Set() : new Set(rows.map(rowKey)))
-            }
+            onClick={removeAll}
             className="text-brand-strong text-[12px] font-medium hover:underline"
           >
-            {allSelected ? 'Clear all' : 'Select all'}
+            Un-allocate all
           </button>
         </footer>
       )}

@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { useWorkspace } from '../state/Workspace.jsx'
+import { useAllocations } from '../state/Allocations.jsx'
 import { programColours } from '../domain/programs.js'
-import AdmissionCard from './AdmissionCard.jsx'
+import DraggableAdmissionCard from './DraggableAdmissionCard.jsx'
 
 /**
  * Students in the current term and location who have not yet been placed in a
@@ -20,16 +21,30 @@ import AdmissionCard from './AdmissionCard.jsx'
  * nothing looks wrong; at a hundred, most of the queue would be unreachable.
  */
 export default function WaitingPanel() {
-  const { unallocatedAdmissions, classes } = useWorkspace()
+  const { admissions, classes } = useWorkspace()
+  const { allocatedAdmissionIds } = useAllocations()
 
   const colours = useMemo(() => programColours(classes), [classes])
 
+  /**
+   * Waiting = not in any class roster once pending edits are applied.
+   *
+   * Derived from the rosters rather than from the `Allocated` checkbox. The two
+   * can disagree — CRM currently holds at least one admission sitting in a class
+   * while flagged unallocated — and the roster is the stronger evidence, since
+   * it is the allocation itself rather than a flag describing it. Reading the
+   * flag instead would show the same student on the board and in this queue at
+   * once, and would leave un-allocating with no visible effect here until the
+   * save round-tripped.
+   */
   const sorted = useMemo(
     () =>
-      [...unallocatedAdmissions].sort((a, b) =>
-        String(a.Name ?? '').localeCompare(String(b.Name ?? ''), undefined, { numeric: true }),
-      ),
-    [unallocatedAdmissions],
+      admissions
+        .filter((a) => !allocatedAdmissionIds.has(a.id))
+        .sort((a, b) =>
+          String(a.Name ?? '').localeCompare(String(b.Name ?? ''), undefined, { numeric: true }),
+        ),
+    [admissions, allocatedAdmissionIds],
   )
 
   return (
@@ -65,7 +80,7 @@ export default function WaitingPanel() {
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5">
           {sorted.map((admission) => (
-            <AdmissionCard
+            <DraggableAdmissionCard
               key={admission.id}
               admission={admission}
               colour={colours.get(admission.Program_Name)}

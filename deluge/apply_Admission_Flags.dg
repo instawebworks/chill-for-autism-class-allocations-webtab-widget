@@ -1,0 +1,131 @@
+/*
+ * Zoho CRM — standalone function, called by the Class Allocations widget.
+ *
+ * Sets the Allocated checkbox on a batch of Admissions. Separate from the class
+ * function because the two write different modules and want different chunk
+ * sizes: this one is a single field per record and costs one API call, while a
+ * class write costs one call plus a derivation that fetches every row.
+ *
+ * ---------------------------------------------------------------------------
+ * Argument
+ * ---------------------------------------------------------------------------
+ *
+ *   {
+ *     "v": 1,
+ *     "admissions": [
+ *       { "id": "125966000002354022", "allocated": true },
+ *       { "id": "125966000002378020", "allocated": false }
+ *     ]
+ *   }
+ *
+ * The value is sent explicitly rather than toggled, so the call is idempotent
+ * and a retry after an ambiguous timeout cannot flip a flag back.
+ *
+ * ---------------------------------------------------------------------------
+ * On ordering
+ * ---------------------------------------------------------------------------
+ *
+ * Run this AFTER the class rosters. If admissions were flagged first and the
+ * class write then failed, a student would be marked placed while sitting in no
+ * class — and would have quietly left the waiting queue in every CRM view.
+ *
+ * The reverse failure is much softer: rosters written, flags not. The widget
+ * derives its waiting list from the rosters themselves, so it stays correct; it
+ * is CRM's own views and reports that would be briefly wrong.
+ *
+ * ---------------------------------------------------------------------------
+ * Returns
+ * ---------------------------------------------------------------------------
+ *
+ *   { "v":1, "ok":2, "failed":0,
+ *     "results":[ {"id":"…","status":"success","allocated":true} ] }
+ */
+string standalone.apply_Admission_Flags(String payload)
+{
+	VERSION = 1;
+	results = List();
+	okCount = 0;
+	failCount = 0;
+	parsed = Map();
+	parseFailed = false;
+	try
+	{
+		parsed = payload.toMap();
+	}
+	catch (e)
+	{
+		parseFailed = true;
+	}
+	if(parseFailed || parsed == null || parsed.isEmpty())
+	{
+		out = Map();
+		out.put("v",VERSION);
+		out.put("ok",0);
+		out.put("failed",0);
+		out.put("error","payload was not readable as JSON");
+		info "apply_Admission_Flags: unreadable payload.";
+		return out.toString();
+	}
+	admissions = ifnull(parsed.get("admissions"),List());
+	for each  adm in admissions
+	{
+		entry = Map();
+		admissionId = ifnull(adm.get("id"),"").toString().trim();
+		entry.put("id",admissionId);
+		if(admissionId == "")
+		{
+			entry.put("status","error");
+			entry.put("message","missing admission id");
+			failCount = failCount + 1;
+		}
+		else
+		{
+			// Absent is treated as false rather than as "leave alone": the
+			// caller always states the value it wants, so a missing key is a
+			// malformed payload, and unticking is the safer reading of it — a
+			// student wrongly left in the queue is visible and correctable,
+			// one wrongly marked placed is neither.
+			wanted = false;
+			if(adm.get("allocated") != null)
+			{
+				wanted = adm.get("allocated").toString().equalsIgnoreCase("true");
+			}
+			upd = Map();
+			upd.put("Allocated",wanted);
+			// Triggers left to fire. This is an ordinary business change, not a
+			// backfill, so anything the org has hung off an Admission update is
+			// entitled to run. (The backfills in this project passed trigger:[]
+			// deliberately; that was the exception, not the pattern.)
+			try
+			{
+				resp = zoho.crm.updateRecord("Admissions",admissionId.toLong(),upd);
+				if(resp == null || resp.get("id") == null)
+				{
+					entry.put("status","error");
+					entry.put("message","update rejected: " + resp.toString());
+					failCount = failCount + 1;
+				}
+				else
+				{
+					entry.put("status","success");
+					entry.put("allocated",wanted);
+					okCount = okCount + 1;
+				}
+			}
+			catch (e)
+			{
+				entry.put("status","error");
+				entry.put("message","update threw: " + e.toString());
+				failCount = failCount + 1;
+			}
+		}
+		results.add(entry);
+	}
+	out = Map();
+	out.put("v",VERSION);
+	out.put("ok",okCount);
+	out.put("failed",failCount);
+	out.put("results",results);
+	info "apply_Admission_Flags: " + okCount + " ok, " + failCount + " failed, " + admissions.size() + " submitted.";
+	return out.toString();
+}

@@ -1,6 +1,8 @@
 import { useWorkspace } from './state/Workspace.jsx'
+import { useAllocations } from './state/Allocations.jsx'
 import BrandLogo from './components/BrandLogo.jsx'
 import LocationPicker from './components/LocationPicker.jsx'
+import SaveChangesButton from './components/SaveChangesButton.jsx'
 import ScheduleBoard from './components/ScheduleBoard.jsx'
 import WaitingPanel from './components/WaitingPanel.jsx'
 
@@ -26,6 +28,7 @@ const RANGE_FMT = new Intl.DateTimeFormat('en-GB', {
 
 export default function App() {
   const { targetTerm, classes, classesWithoutLocation } = useWorkspace()
+  const { hasChanges, saving, save } = useAllocations()
 
   return (
     <div className="bg-bg flex h-full flex-col overflow-hidden">
@@ -43,7 +46,16 @@ export default function App() {
             <LocationPicker />
           </div>
         </div>
-        <BrandLogo size="md" className="text-fg shrink-0" />
+        {/* Right-hand cluster: the commit action, then the brand lockup. Grouped
+            rather than left as two siblings of the header's space-between, so the
+            button keeps a fixed distance from the logo instead of drifting across
+            the header as the title's width changes. */}
+        <div className="flex shrink-0 items-start gap-6">
+          <div className="shrink-0 pt-0.5">
+            <SaveChangesButton disabled={!hasChanges} busy={saving} onSave={save} />
+          </div>
+          <BrandLogo size="md" className="text-fg shrink-0" />
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1 gap-3 px-4 pb-4 sm:px-6 sm:pb-5">

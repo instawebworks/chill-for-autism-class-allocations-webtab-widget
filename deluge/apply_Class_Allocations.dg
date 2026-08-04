@@ -1,0 +1,208 @@
+/*
+ * Zoho CRM — standalone function, called by the Class Allocations widget.
+ *
+ * Applies a batch of class rosters in one call. The widget holds every edit of a
+ * session in memory and sends them here on Save, so one round trip replaces one
+ * update per class.
+ *
+ * It exists at all because subform writes are the problem. The Classes subform
+ * reports operation_type api_update:false, and only a *deletion* through the
+ * REST API has actually been proven; creating rows and updating them by row id
+ * has not. Deluge writes subforms without that doubt, so the write lives here
+ * rather than in the browser.
+ *
+ * ---------------------------------------------------------------------------
+ * Argument
+ * ---------------------------------------------------------------------------
+ *
+ * A single String, holding JSON. One string parameter rather than several typed
+ * ones because the payload is nested, and a lone string has exactly one limit to
+ * respect — its length — instead of unclear marshalling rules per type.
+ *
+ *   {
+ *     "v": 1,
+ *     "classes": [
+ *       {
+ *         "id": "125966000002375115",
+ *         "rows": [
+ *           { "rowId": "125966000002441007", "admissionId": "125966000002354022" },
+ *           { "admissionId": "125966000002378020" }
+ *         ]
+ *       }
+ *     ]
+ *   }
+ *
+ * `rows` is the roster the class should END UP with, not a list of changes:
+ *   row with rowId    -> that subform row is kept and updated
+ *   row without rowId -> a new row is created
+ *   row omitted       -> DELETED, because a subform write replaces the whole set
+ *
+ * Sending end state rather than deltas is what makes a retry safe. If the widget
+ * loses the response to a chunk and sends it again, the second call produces the
+ * same roster instead of doubling it.
+ *
+ * Deliberately absent: Allocation_Data_JSON and Seats_Allocated. Both are
+ * derivable from the rows, so sending them would be asking the caller to
+ * duplicate work this function has to do anyway — and would multiply the payload
+ * roughly tenfold, since the snapshot carries names and numbers per student
+ * while a row here is two ids.
+ *
+ * ---------------------------------------------------------------------------
+ * Returns
+ * ---------------------------------------------------------------------------
+ *
+ *   { "v":1, "ok":2, "failed":1,
+ *     "results":[ {"id":"…","status":"success"},
+ *                 {"id":"…","status":"error","message":"…"} ] }
+ *
+ * Per record, not just an overall status. Batched writes make partial failure
+ * normal, and the caller has to be able to retry the two classes that failed
+ * rather than the whole save.
+ */
+string automation.apply_Class_Allocations(String payload)
+{
+	VERSION = 1;
+	results = List();
+	okCount = 0;
+	failCount = 0;
+	parsed = Map();
+	parseFailed = false;
+	try
+	{
+		parsed = payload.toMap();
+	}
+	catch (e)
+	{
+		parseFailed = true;
+	}
+	if(parseFailed || parsed == null || parsed.isEmpty())
+	{
+		out = Map();
+		out.put("v",VERSION);
+		out.put("ok",0);
+		out.put("failed",0);
+		out.put("error","payload was not readable as JSON");
+		info "apply_Class_Allocations: unreadable payload.";
+		return out.toString();
+	}
+	classes = ifnull(parsed.get("classes"),List());
+	for each  cls in classes
+	{
+		entry = Map();
+		classId = ifnull(cls.get("id"),"").toString().trim();
+		entry.put("id",classId);
+		if(classId == "")
+		{
+			entry.put("status","error");
+			entry.put("message","missing class id");
+			failCount = failCount + 1;
+		}
+		else
+		{
+			// Build the subform exactly as it should end up. Every surviving row
+			// has to be present: anything left out of this list is deleted.
+			subform = List();
+			for each  r in ifnull(cls.get("rows"),List())
+			{
+				row = Map();
+				rowId = ifnull(r.get("rowId"),"").toString().trim();
+				admissionId = ifnull(r.get("admissionId"),"").toString().trim();
+				if(rowId != "")
+				{
+					row.put("id",rowId);
+				}
+				if(admissionId != "")
+				{
+					row.put("Admission",admissionId);
+				}
+				// A row with neither id is meaningless and would be rejected;
+				// dropping it here keeps one bad row from failing the class.
+				if(row.size() > 0)
+				{
+					subform.add(row);
+				}
+			}
+			upd = Map();
+			upd.put("Students_Allocated",subform);
+			// Student_Name and Enrolment_No are NOT written. They are derived
+			// columns, filled from the Admission lookup by the derivation step
+			// below, and writing our own values here would only give it
+			// something to overwrite.
+			//
+			// Triggers are suppressed on this write and the derivation is then
+			// invoked directly, rather than left to fire as a workflow. A
+			// workflow rule runs *after* the update returns, so this function
+			// would answer "done" while Allocation_Data_JSON still described the
+			// previous roster — and that snapshot is the only way the widget can
+			// read allocations back. Calling it inline means CRM is consistent
+			// by the time the caller gets a response.
+			opts = Map();
+			opts.put("trigger",List());
+			updateFailed = false;
+			try
+			{
+				resp = zoho.crm.updateRecord("Classes",classId.toLong(),upd,opts);
+				if(resp == null || resp.get("id") == null)
+				{
+					updateFailed = true;
+					entry.put("status","error");
+					entry.put("message","update rejected: " + resp.toString());
+				}
+			}
+			catch (e)
+			{
+				updateFailed = true;
+				entry.put("status","error");
+				entry.put("message","update threw: " + e.toString());
+			}
+			if(updateFailed)
+			{
+				failCount = failCount + 1;
+			}
+			else
+			{
+				// Rebuilds the Class Code, the derived subform columns,
+				// Seats_Allocated and the Allocation_Data_JSON snapshot. Reused
+				// rather than reimplemented so there is one definition of what a
+				// class record should look like.
+				//
+				// NOTE: it fetches each Admission individually, so cost grows
+				// with the number of rows in the batch, not the number of
+				// classes. That is the ceiling to watch when sizing chunks.
+				derivationFailed = false;
+				try
+				{
+					automation.build_Class_Code_And_Allocations(classId.toLong());
+				}
+				catch (e)
+				{
+					derivationFailed = true;
+				}
+				if(derivationFailed)
+				{
+					// The roster itself is correct — only the derived snapshot
+					// is behind. Reported as a distinct state because it is
+					// recoverable by rerunning the derivation alone, and does
+					// not need the allocation sending again.
+					entry.put("status","partial");
+					entry.put("message","rows written, derived fields not rebuilt");
+					failCount = failCount + 1;
+				}
+				else
+				{
+					entry.put("status","success");
+					entry.put("rows",subform.size());
+					okCount = okCount + 1;
+				}
+			}
+		}
+		results.add(entry);
+	}
+	out = Map();
+	out.put("v",VERSION);
+	out.put("ok",okCount);
+	out.put("failed",failCount);
+	out.put("results",results);
+	info "apply_Class_Allocations: " + okCount + " ok, " + failCount + " failed, " + classes.size() + " submitted.";
+	return out.toString();
+}

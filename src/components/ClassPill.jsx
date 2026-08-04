@@ -1,6 +1,10 @@
-import { capacityOf, occupancyOf } from '../domain/classes.js'
+import { useDroppable } from '@dnd-kit/core'
+import { capacityOf } from '../domain/classes.js'
 import { programLabel } from '../domain/schedule.js'
 import { normaliseHex, readableTextOn, withAlpha } from '../domain/colour.js'
+import { useAllocations } from '../state/Allocations.jsx'
+import { classDroppableId, useBoard } from '../state/Board.jsx'
+import { evaluateAllocation } from '../domain/eligibility.js'
 
 /**
  * One session on the board: programme name in a pill, time beneath.
@@ -17,8 +21,20 @@ import { normaliseHex, readableTextOn, withAlpha } from '../domain/colour.js'
  * that is not a hex colour — a pill with no colour is still a usable pill.
  */
 export default function ClassPill({ cls, onOpen }) {
+  const { rosterFor } = useAllocations()
+  const { dwellEnabled, dwellMs, activeAdmission } = useBoard()
+  const { setNodeRef, isOver } = useDroppable({ id: classDroppableId(cls.id) })
   const label = programLabel(cls.Program)
-  const taken = occupancyOf(cls)
+
+  // Judged while the card is still in the air, so an impossible target says so
+  // before the user spends the dwell on it.
+  const verdict = activeAdmission
+    ? evaluateAllocation({ cls, admission: activeAdmission, roster: rosterFor(cls) })
+    : null
+  const blocked = verdict != null && !verdict.ok
+  // Counts the pending roster, so the badge falls the moment a student is
+  // un-allocated in the dialog rather than waiting for a save.
+  const taken = rosterFor(cls).length
   const capacity = capacityOf(cls)
 
   const fill = normaliseHex(cls.Class_Color_Code)
@@ -39,9 +55,12 @@ export default function ClassPill({ cls, onOpen }) {
     // A real <button>, not a div with onClick: the pill is the entry point to
     // the roster, so it has to be reachable and operable from the keyboard.
     <button
+      ref={setNodeRef}
       type="button"
       onClick={() => onOpen?.(cls)}
-      className="flex w-full min-w-0 cursor-pointer flex-col items-center gap-1 rounded-full text-left transition-transform hover:scale-[1.02] active:scale-[0.99]"
+      className={`relative flex w-full min-w-0 cursor-pointer flex-col items-center gap-1 rounded-full text-left transition-transform ${
+        isOver ? 'scale-[1.04]' : 'hover:scale-[1.02] active:scale-[0.99]'
+      }`}
       aria-label={`${cls.Program}, ${cls.Class_Day} ${cls.Class_Time}, ${taken} of ${capacity} seats taken`}
     >
       {/**
@@ -52,8 +71,18 @@ export default function ClassPill({ cls, onOpen }) {
        * length. The name centres in the space that is left.
        */}
       <div
-        className={`flex w-full min-w-0 items-center gap-1.5 rounded-full border py-1.5 pr-1.5 pl-2.5 ${
+        className={`relative flex w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-full border py-1.5 pr-1.5 pl-2.5 ${
           fill ? '' : 'bg-surface-3 border-line-strong'
+        } ${
+          isOver
+            ? `ring-offset-bg ring-2 ring-offset-2 ${
+                blocked
+                  ? verdict.tone === 'danger'
+                    ? 'ring-danger'
+                    : 'ring-warn'
+                  : 'ring-brand-strong'
+              }`
+            : ''
         }`}
         style={
           fill
@@ -82,6 +111,21 @@ export default function ClassPill({ cls, onOpen }) {
             title={`${taken} of ${capacity} seats taken`}
           >
             {taken}/{capacity}
+          </span>
+        )}
+
+        {/*
+          Dwell meter. The spring-open is invisible until it happens, so without
+          this the user has no way to learn that resting on a class does
+          anything — they read the pause as the drag having stuck. The bar runs
+          for exactly as long as the timer, so it doubles as the countdown.
+        */}
+        {isOver && dwellEnabled && (
+          <span className="pointer-events-none absolute inset-x-0 bottom-0 h-0.75">
+            <span
+              className="animate-dwell block h-full w-full bg-white/85"
+              style={{ '--dwell-duration': `${dwellMs}ms` }}
+            />
           </span>
         )}
       </div>
