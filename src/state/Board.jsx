@@ -121,6 +121,23 @@ export function BoardProvider({ children }) {
     useSensor(KeyboardSensor),
   )
 
+  const classById = useCallback((id) => classes.find((c) => c.id === id) ?? null, [classes])
+
+  /**
+   * The open class, resolved against the classes actually loaded — and the only
+   * thing allowed to mean "a dialog is open".
+   *
+   * A term switch replaces the class list under a held `openClassId`, which then
+   * resolves to nothing. Reading the raw id as the open state would leave the
+   * board convinced a dialog was up: collision detection filters to the dialog's
+   * drop zone whenever one is, so every drop would be scored against a target
+   * that no longer exists and dragging would go dead with nothing on screen to
+   * explain it. Deriving the answer means a class that has gone away is simply
+   * closed. This used to be moot — the provider was destroyed by every reload.
+   */
+  const openClass = useMemo(() => classById(openClassId), [classById, openClassId])
+  const dialogOpen = openClass != null
+
   /**
    * While a dialog is open it is the only thing that can be dropped on.
    *
@@ -131,7 +148,7 @@ export function BoardProvider({ children }) {
    */
   const collisionDetection = useCallback(
     (args) => {
-      const containers = openClassId
+      const containers = dialogOpen
         ? args.droppableContainers.filter((c) => c.id === DIALOG_DROP_ID)
         : args.droppableContainers.filter((c) => c.id !== DIALOG_DROP_ID)
       const scoped = { ...args, droppableContainers: containers }
@@ -148,10 +165,8 @@ export function BoardProvider({ children }) {
       // at all, and nearest centre is the only workable answer there.
       return args.pointerCoordinates ? [] : closestCenter(scoped)
     },
-    [openClassId],
+    [dialogOpen],
   )
-
-  const classById = useCallback((id) => classes.find((c) => c.id === id) ?? null, [classes])
 
   const onDragStart = useCallback(
     ({ active, activatorEvent }) => {
@@ -222,8 +237,8 @@ export function BoardProvider({ children }) {
       if (!over || !admissionId) return
 
       // The intended path: dropped inside the open class's dialog.
-      if (over.id === DIALOG_DROP_ID && openClassId) {
-        tryAllocate(classById(openClassId), admissionId)
+      if (over.id === DIALOG_DROP_ID && openClass) {
+        tryAllocate(openClass, admissionId)
         return
       }
 
@@ -235,7 +250,7 @@ export function BoardProvider({ children }) {
         if (tryAllocate(classById(classId), admissionId)) setOpenClassId(classId)
       }
     },
-    [classById, finishDrag, openClassId, tryAllocate],
+    [classById, finishDrag, openClass, tryAllocate],
   )
 
   const colours = useMemo(() => programColours(classes), [classes])
@@ -246,8 +261,10 @@ export function BoardProvider({ children }) {
 
   const value = useMemo(
     () => ({
-      openClassId,
-      openClass: classById(openClassId),
+      // Reported from the resolved class, so a stale id left over from another
+      // term reads as closed here too rather than only inside this provider.
+      openClassId: openClass?.id ?? null,
+      openClass,
       showClass: setOpenClassId,
       closeClass: () => setOpenClassId(null),
       isDragging: activeAdmissionId != null,
@@ -257,7 +274,7 @@ export function BoardProvider({ children }) {
       dwellEnabled: pointerDrag,
       dwellMs: DWELL_MS,
     }),
-    [openClassId, classById, activeAdmissionId, activeAdmission, pointerDrag],
+    [openClass, activeAdmissionId, activeAdmission, pointerDrag],
   )
 
   return (

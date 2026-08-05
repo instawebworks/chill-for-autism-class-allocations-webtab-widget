@@ -91,8 +91,8 @@ export const BOOTSTRAP_STAGES = [
         run: () => fetchTerms(),
       },
     ],
-    derive: (ctx) => {
-      const { term, basis } = resolveTargetTerm(ctx.terms)
+    derive: (ctx, { selectedTermId } = {}) => {
+      const { term, basis } = resolveTargetTerm(ctx.terms, { selectedId: selectedTermId })
       if (!term) throw new Error('No terms returned — cannot determine the target term.')
       console.info(`[bootstrap] target term: ${term.label} (${basis})`)
       return { targetTerm: term, targetTermBasis: basis }
@@ -154,10 +154,17 @@ function sizeOf(value) {
 /**
  * Runs the stages in order, reporting each task transition.
  *
+ * `options` is handed to every stage's `derive`, which is how a caller steers the
+ * run without the stages having to reach out for state. Today that is the term
+ * the user picked in the header: the whole bootstrap is re-run on a term switch,
+ * because everything after stage 1 is fetched with term criteria and none of it
+ * can be re-scoped client-side the way location can.
+ *
  * @param {(key: string, state: object) => void} onProgress
+ * @param {{ selectedTermId?: string|null }} [options]
  * @returns {Promise<{data: object, errors: object}>}
  */
-export async function runBootstrap(onProgress = () => {}) {
+export async function runBootstrap(onProgress = () => {}, options = {}) {
   const ctx = {}
   const errors = {}
 
@@ -183,7 +190,7 @@ export async function runBootstrap(onProgress = () => {}) {
 
     if (!stageFailed && stage.derive) {
       try {
-        Object.assign(ctx, stage.derive(ctx))
+        Object.assign(ctx, stage.derive(ctx, options))
       } catch (err) {
         errors[`${stage.name}:derive`] = String(err?.message ?? err)
         console.error(`[bootstrap] ${stage.name} derive failed:`, err)

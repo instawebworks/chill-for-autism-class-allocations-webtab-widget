@@ -149,10 +149,12 @@ export function changedClasses(classes = [], pending = {}) {
   return classes.filter((cls) => !sameRoster(baselineRoster(cls), desiredRoster(cls, pending)))
 }
 
-/** Is there anything to save? */
-export function hasPendingChanges(classes = [], pending = {}) {
-  return changedClasses(classes, pending).length > 0
-}
+// `hasPendingChanges` used to live here as changedClasses(...).length > 0.
+// Removed rather than left: its only caller now needs the count as well — the
+// term-switch confirmation names how many classes are about to be lost — so it
+// calls changedClasses once and reads both answers off that. Keeping a wrapper
+// that recomputes the same list for the boolean would have meant doing the work
+// twice per render to save one comparison.
 
 /**
  * Every admission that sits in some class once pending changes are applied.

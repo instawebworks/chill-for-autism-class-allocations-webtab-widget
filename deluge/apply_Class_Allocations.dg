@@ -59,7 +59,7 @@
  * normal, and the caller has to be able to retry the two classes that failed
  * rather than the whole save.
  */
-string automation.apply_Class_Allocations(String payload)
+string standalone.apply_Class_Allocations(String payload)
 {
 	VERSION = 1;
 	results = List();
@@ -165,6 +165,12 @@ string automation.apply_Class_Allocations(String payload)
 				// Seats_Allocated and the Allocation_Data_JSON snapshot. Reused
 				// rather than reimplemented so there is one definition of what a
 				// class record should look like.
+				//
+				// The `automation.` prefix is not a slip. This function is
+				// standalone; build_Class_Code_And_Allocations is the Classes
+				// workflow function and lives in the automation namespace, so
+				// the call across is qualified. Do not "correct" it to match
+				// the declaration above.
 				//
 				// NOTE: it fetches each Admission individually, so cost grows
 				// with the number of rows in the batch, not the number of

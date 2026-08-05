@@ -5,8 +5,8 @@ import { applyAllocations } from '../crm/save.js'
 import { useNotice } from './Notice.jsx'
 import { priorRowsByRowId, resolveRosterRow } from '../domain/allocations.js'
 import {
+  changedClasses,
   desiredRoster,
-  hasPendingChanges,
   projectedAllocatedIds,
   withAdmission,
   withClassReset,
@@ -28,10 +28,35 @@ const AllocationsContext = createContext(null)
  * placement. Location is a lens on the display, never on the truth.
  */
 export function AllocationsProvider({ children }) {
-  const { classes, admissions, reload } = useData()
+  const { classes, admissions, reload, generation } = useData()
   const { notify } = useNotice()
   const [pending, setPending] = useState({})
   const [saving, setSaving] = useState(false)
+
+  /**
+   * A new data set means these edits no longer describe anything real, so they
+   * go — after a save because they have just been applied, after a term switch
+   * because they belonged to the term being left.
+   *
+   * Stated explicitly rather than left to unmounting. This provider used to be
+   * destroyed by every re-load, which cleared `pending` as a side effect; it now
+   * survives one, so that guarantee has to be written down to still hold.
+   *
+   * Adjusted during render rather than in an effect. An effect would paint one
+   * frame of the new term's board with the previous term's edits laid over it —
+   * rosters keyed by class ids that do not exist in this term — and only clear
+   * them on the pass after. Here, that frame never happens. This is React's
+   * documented "adjust state when a prop changes" pattern; setState during the
+   * render of the same component is the one place it is legitimate.
+   *
+   * Tied to `generation`, which only advances on a *successful* load — a term
+   * switch that fails keeps both the previous data and the edits made against it.
+   */
+  const [loadedGeneration, setLoadedGeneration] = useState(generation)
+  if (loadedGeneration !== generation) {
+    setLoadedGeneration(generation)
+    setPending({})
+  }
 
   const allocate = useCallback((cls, admissionId) => {
     setPending((p) => withAdmission(p, cls, admissionId))
@@ -53,8 +78,8 @@ export function AllocationsProvider({ children }) {
    * On success the data set is reloaded rather than the pending edits simply
    * being dropped. Clearing them alone would snap the board back to the rosters
    * loaded at startup — which no longer match CRM — so the save would appear to
-   * undo itself. The reload unmounts this provider, which discards `pending`
-   * as a side effect; that is correct, because it has just been applied.
+   * undo itself. The reload lands a new generation, and the effect above clears
+   * `pending` against it; that is correct, because it has just been applied.
    *
    * On any failure the pending edits are kept, all of them, including the parts
    * that succeeded. That is safe precisely because the payload is the roster a
@@ -113,6 +138,10 @@ export function AllocationsProvider({ children }) {
   )
 
   const value = useMemo(() => {
+    // Computed once and shared: the count is what the term-switch confirmation
+    // reports, and "is anything pending?" is the same question asked of it.
+    const changed = changedClasses(classes, pending)
+
     return {
       pending,
       allocate,
@@ -123,7 +152,10 @@ export function AllocationsProvider({ children }) {
       saving,
 
       /** Is anything actually different from what CRM holds? */
-      hasChanges: hasPendingChanges(classes, pending),
+      hasChanges: changed.length > 0,
+
+      /** How many classes a save would touch — for warning before losing them. */
+      changedClassCount: changed.length,
 
       /** A class's roster as the user has left it. */
       rosterFor: (cls) => desiredRoster(cls, pending),
