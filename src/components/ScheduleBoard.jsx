@@ -25,19 +25,19 @@ function cellClass(index, extra = '') {
 function PeriodRail() {
   return (
     <div
-      className="hidden w-5 shrink-0 sm:grid"
+      className="hidden w-10 shrink-0 sm:grid"
       style={{ gridTemplateRows: GRID_ROWS }}
       aria-hidden="true"
     >
       <div />
       <div className="flex items-center justify-center">
-        <span className="text-subtle rotate-180 text-[10px] font-semibold tracking-wide [writing-mode:vertical-rl]">
+        <span className="text-fg rotate-180 text-[30px] font-semibold tracking-wide [writing-mode:vertical-rl]">
           Morning
         </span>
       </div>
       <div />
       <div className="flex items-center justify-center">
-        <span className="text-subtle rotate-180 text-[10px] font-semibold tracking-wide [writing-mode:vertical-rl]">
+        <span className="text-fg rotate-180 text-[30px] font-semibold tracking-wide [writing-mode:vertical-rl]">
           Afternoon
         </span>
       </div>
