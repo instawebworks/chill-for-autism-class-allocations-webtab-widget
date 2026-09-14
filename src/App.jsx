@@ -10,7 +10,7 @@ import WaitingPanel from './components/WaitingPanel.jsx'
 import { PanelsSkeleton } from './components/TimetableSkeleton.jsx'
 
 /**
- * Widget shell.
+ * Widget shell..
  *
  * Fills the iframe exactly — `h-full` off the html/body/#root chain, so it
  * follows whatever height the device or CRM gives it — and never scrolls the
