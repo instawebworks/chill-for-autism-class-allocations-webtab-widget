@@ -1,4 +1,5 @@
 import { capacityOf, lookupName } from './classes.js'
+import { programKey } from './programs.js'
 import { programLabel } from './schedule.js'
 
 /**
@@ -13,14 +14,6 @@ import { programLabel } from './schedule.js'
  * makes the user guess which of several rules they broke, and the message is
  * part of the rule rather than decoration for it.
  */
-
-/** Programme names are free-text picklists; compare them forgivingly. */
-function normaliseProgram(value) {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-}
 
 /**
  * @param {object}   input
@@ -58,8 +51,12 @@ export function evaluateAllocation({ cls, admission, roster = [] }) {
 
   // Checked before capacity: if both fail, the wrong programme is the more
   // useful thing to be told, because freeing a seat would not help.
-  const wanted = normaliseProgram(cls.Program)
-  const held = normaliseProgram(admission.Program_Name)
+  //
+  // Compared by programKey, which is programme *identity*: a "Chill Plus"
+  // admission belongs in a "01_Chill Plus" class, because the number is an
+  // instance label, not a different programme.
+  const wanted = programKey(cls.Program)
+  const held = programKey(admission.Program_Name)
   if (wanted && held && wanted !== held) {
     return {
       ok: false,

@@ -11,10 +11,17 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
+import { useData } from '../crm/DataProvider.jsx'
 import { useWorkspace } from './Workspace.jsx'
 import { useAllocations } from './Allocations.jsx'
-import { programColours } from '../domain/programs.js'
+import { colourForProgram, programColours } from '../domain/programs.js'
 import { evaluateAllocation } from '../domain/eligibility.js'
+import {
+  preferencesByEnrollment,
+  preferencesForAdmission,
+  preferenceTitle,
+  shortSlot,
+} from '../domain/preferences.js'
 import AdmissionCard from '../components/AdmissionCard.jsx'
 import { useNotice } from './Notice.jsx'
 
@@ -83,6 +90,9 @@ export function BoardProvider({ children }) {
   const { classes, admissions } = useWorkspace()
   const { allocate, rosterFor } = useAllocations()
   const { notify, dismiss: dismissNotice } = useNotice()
+  // Full term data, not the workspace view: preferences follow the enrolment,
+  // which is not location-scoped.
+  const { enrollments = [] } = useData()
 
   const [openClassId, setOpenClassId] = useState(null)
   const [activeAdmissionId, setActiveAdmissionId] = useState(null)
@@ -259,6 +269,18 @@ export function BoardProvider({ children }) {
     [admissions, activeAdmissionId],
   )
 
+  const prefsByEnrollment = useMemo(() => preferencesByEnrollment(enrollments), [enrollments])
+
+  /**
+   * The dragged admission's ranked session preferences, for the pills and the
+   * dialog to judge themselves against. Empty when nothing is dragged or the
+   * enrolment gave none — consumers show nothing rather than guessing.
+   */
+  const activePreferences = useMemo(
+    () => preferencesForAdmission(activeAdmission, prefsByEnrollment),
+    [activeAdmission, prefsByEnrollment],
+  )
+
   const value = useMemo(
     () => ({
       // Reported from the resolved class, so a stale id left over from another
@@ -270,11 +292,12 @@ export function BoardProvider({ children }) {
       isDragging: activeAdmissionId != null,
       activeAdmissionId,
       activeAdmission,
+      activePreferences,
       /** Pointer drags spring dialogs open; keyboard drags do not. */
       dwellEnabled: pointerDrag,
       dwellMs: DWELL_MS,
     }),
-    [openClass, activeAdmissionId, activeAdmission, pointerDrag],
+    [openClass, activeAdmissionId, activeAdmission, activePreferences, pointerDrag],
   )
 
   return (
@@ -311,7 +334,9 @@ export function BoardProvider({ children }) {
           <div className="w-55 rotate-[-1.5deg] cursor-grabbing opacity-95 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.75)]">
             <AdmissionCard
               admission={activeAdmission}
-              colour={colours.get(activeAdmission.Program_Name)}
+              colour={colourForProgram(colours, activeAdmission.Program_Name)}
+              preference={shortSlot(activePreferences[0])}
+              preferenceTitle={preferenceTitle(activePreferences)}
             />
           </div>
         ) : null}

@@ -1,7 +1,14 @@
 import { useMemo } from 'react'
+import { useData } from '../crm/DataProvider.jsx'
 import { useWorkspace } from '../state/Workspace.jsx'
 import { useAllocations } from '../state/Allocations.jsx'
-import { programColours } from '../domain/programs.js'
+import { colourForProgram, programColours } from '../domain/programs.js'
+import {
+  preferencesByEnrollment,
+  preferencesForAdmission,
+  preferenceTitle,
+  shortSlot,
+} from '../domain/preferences.js'
 import DraggableAdmissionCard from './DraggableAdmissionCard.jsx'
 
 /**
@@ -23,8 +30,12 @@ import DraggableAdmissionCard from './DraggableAdmissionCard.jsx'
 export default function WaitingPanel() {
   const { admissions, classes } = useWorkspace()
   const { allocatedAdmissionIds } = useAllocations()
+  // Enrolments come straight from the data layer: preferences belong to the
+  // enrolment, which is not location-scoped the way this panel's admissions are.
+  const { enrollments = [] } = useData()
 
   const colours = useMemo(() => programColours(classes), [classes])
+  const prefsByEnrollment = useMemo(() => preferencesByEnrollment(enrollments), [enrollments])
 
   /**
    * Waiting = not in any class roster once pending edits are applied.
@@ -79,13 +90,18 @@ export default function WaitingPanel() {
         </div>
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5">
-          {sorted.map((admission) => (
-            <DraggableAdmissionCard
-              key={admission.id}
-              admission={admission}
-              colour={colours.get(admission.Program_Name)}
-            />
-          ))}
+          {sorted.map((admission) => {
+            const prefs = preferencesForAdmission(admission, prefsByEnrollment)
+            return (
+              <DraggableAdmissionCard
+                key={admission.id}
+                admission={admission}
+                colour={colourForProgram(colours, admission.Program_Name)}
+                preference={shortSlot(prefs[0])}
+                preferenceTitle={preferenceTitle(prefs)}
+              />
+            )
+          })}
         </div>
       )}
     </aside>

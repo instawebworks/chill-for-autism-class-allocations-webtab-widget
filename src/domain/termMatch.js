@@ -65,6 +65,21 @@ export function admissionInTerm(adm, term) {
 }
 
 /**
+ * Does an Enrollments record belong to `term`?
+ *
+ * `Term` carries both parts ("Term 4 2026") and the module has no
+ * Academic_Year to fall back on, so a line missing its year cannot match.
+ * Term-break enrolments hold a null Term and are excluded, correctly — they
+ * have no in-term classes to prefer.
+ */
+export function enrollmentInTerm(enr, term) {
+  const want = termNumberOf(term)
+  const parsed = parseTermText(enr?.Term)
+  if (want == null || !parsed) return false
+  return parsed.number === want && parsed.year === term.year
+}
+
+/**
  * Zoho search criteria for the same question, used to narrow the fetch
  * server-side. Kept deliberately loose — it is an optimisation, never the
  * correctness boundary. Whatever comes back is still passed through the
@@ -76,5 +91,10 @@ export function classTermCriteria(term) {
 }
 
 export function admissionTermCriteria(term) {
+  return `(Term:equals:${term.label})`
+}
+
+/** Enrollments store the term the same way Admissions do. */
+export function enrollmentTermCriteria(term) {
   return `(Term:equals:${term.label})`
 }

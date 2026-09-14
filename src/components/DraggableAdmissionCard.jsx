@@ -14,7 +14,7 @@ import { lookupName } from '../domain/classes.js'
  * would re-flow the queue under the pointer, and the card is not gone yet: the
  * drag can still be cancelled.
  */
-export default function DraggableAdmissionCard({ admission, colour }) {
+export default function DraggableAdmissionCard({ admission, colour, preference, preferenceTitle }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: admissionDraggableId(admission.id),
   })
@@ -36,7 +36,12 @@ export default function DraggableAdmissionCard({ admission, colour }) {
       aria-roledescription="draggable admission"
       aria-label={`${student}, ${admission.Name}. Press space to pick up, then use the arrow keys to choose a class.`}
     >
-      <AdmissionCard admission={admission} colour={colour} />
+      <AdmissionCard
+        admission={admission}
+        colour={colour}
+        preference={preference}
+        preferenceTitle={preferenceTitle}
+      />
     </div>
   )
 }

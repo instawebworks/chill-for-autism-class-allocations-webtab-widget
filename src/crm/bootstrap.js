@@ -6,6 +6,8 @@ import {
   admissionTermCriteria,
   classInTerm,
   classTermCriteria,
+  enrollmentInTerm,
+  enrollmentTermCriteria,
 } from '../domain/termMatch.js'
 
 const LOCATION_FIELDS = [
@@ -44,6 +46,10 @@ const CLASS_FIELDS = [
   // back from getRecords. See domain/allocations.js.
   'Allocation_Data_JSON',
 ]
+
+// Only what the preference display needs. The module carries a lot more
+// (signatures, NDIS goals, consents) that the widget has no business reading.
+const ENROLLMENT_FIELDS = ['Name', 'Session_Preference_Order', 'Term']
 
 const ADMISSION_FIELDS = [
   'Name',
@@ -133,6 +139,27 @@ export const BOOTSTRAP_STAGES = [
             fields: ADMISSION_FIELDS,
             matcher: (a) => admissionInTerm(a, ctx.targetTerm),
           }),
+      },
+      {
+        key: 'enrollments',
+        label: 'Preferences',
+        hint: 'Session preferences from enrolments',
+        // Non-fatal by design, unlike every other task. Preferences are a hint
+        // for the person allocating, and a hint must never take the timetable
+        // down with it — a failed fetch degrades to "no preferences shown",
+        // logged so the absence is diagnosable rather than silent.
+        run: async (ctx) => {
+          try {
+            return await fetchByTerm('Enrollments', {
+              criteria: enrollmentTermCriteria(ctx.targetTerm),
+              fields: ENROLLMENT_FIELDS,
+              matcher: (e) => enrollmentInTerm(e, ctx.targetTerm),
+            })
+          } catch (err) {
+            console.warn('[bootstrap] enrollments failed — preferences will not be shown.', err)
+            return []
+          }
+        },
       },
     ],
   },

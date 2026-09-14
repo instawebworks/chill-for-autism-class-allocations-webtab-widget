@@ -7,6 +7,7 @@ import { capacityOf, lookupName } from '../domain/classes.js'
 import { programLabel } from '../domain/schedule.js'
 import { shadeForWhiteText } from '../domain/colour.js'
 import { evaluateAllocation } from '../domain/eligibility.js'
+import { ordinal, preferenceRankFor } from '../domain/preferences.js'
 import { useAllocations } from '../state/Allocations.jsx'
 import { DIALOG_DROP_ID, useBoard } from '../state/Board.jsx'
 
@@ -32,7 +33,7 @@ import { DIALOG_DROP_ID, useBoard } from '../state/Board.jsx'
 export default function ClassDialog({ cls, onClose }) {
   const titleId = useId()
   const { deallocate, rosterRowsFor } = useAllocations()
-  const { isDragging, activeAdmission } = useBoard()
+  const { isDragging, activeAdmission, activePreferences } = useBoard()
   // The whole panel is the drop target, not just the list: once the dialog has
   // sprung open the user is already moving toward it, and asking them to find a
   // smaller zone inside it would waste the gesture.
@@ -55,6 +56,13 @@ export default function ClassDialog({ cls, onClose }) {
     ? evaluateAllocation({ cls, admission: activeAdmission, roster: rows })
     : null
   const blocked = verdict != null && !verdict.ok
+
+  // Named in the drop zone so the confirmation moment — roster in view, about
+  // to release — also says how much the family wanted this slot. Any rank is
+  // worth stating here: unlike the board, one line about one class is never
+  // noise, and "their 9th preference" is exactly the pause-for-thought a low
+  // rank should cause.
+  const rank = activeAdmission && !blocked ? preferenceRankFor(activePreferences, cls) : null
 
   const removeAll = () => {
     for (const row of rows) {
@@ -189,9 +197,9 @@ export default function ClassDialog({ cls, onClose }) {
           >
             {blocked
               ? verdict.title
-              : isOver
-                ? 'Release to allocate'
-                : 'Drop here to allocate'}
+              : `${isOver ? 'Release to allocate' : 'Drop here to allocate'}${
+                  rank ? ` — their ${ordinal(rank)} preference` : ''
+                }`}
           </div>
         </div>
       )}

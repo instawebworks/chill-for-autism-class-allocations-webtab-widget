@@ -12,9 +12,13 @@ export const PERIODS = ['Morning', 'Afternoon']
  * Minutes past midnight for the start of a time range like "10am - 12:30pm"
  * or "2pm - 4:45pm". Returns null when unparseable, so callers can decide
  * rather than silently sorting an unknown to the top.
+ *
+ * Accepts both ":" and "." as the minute separator. Class records use colons,
+ * but the enrolment form's session slots use dots ("Fridays 2pm - 4.30pm"),
+ * and preference matching parses both sides through this one function.
  */
 export function startMinutes(timeText) {
-  const m = String(timeText ?? '').match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i)
+  const m = String(timeText ?? '').match(/(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)/i)
   if (!m) return null
   let hour = Number(m[1]) % 12
   const mins = Number(m[2] ?? 0)

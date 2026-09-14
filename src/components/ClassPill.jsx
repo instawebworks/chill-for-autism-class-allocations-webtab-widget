@@ -5,6 +5,15 @@ import { normaliseHex, readableTextOn, withAlpha } from '../domain/colour.js'
 import { useAllocations } from '../state/Allocations.jsx'
 import { classDroppableId, useBoard } from '../state/Board.jsx'
 import { evaluateAllocation } from '../domain/eligibility.js'
+import { ordinal, preferenceRankFor } from '../domain/preferences.js'
+
+/**
+ * Rank badges stop here. The enrolment form ranks all ten weekly slots, so
+ * past the head of the list a badge stops meaning "they want this one" and
+ * starts meaning "this slot exists" — a board where every pill is numbered
+ * says nothing.
+ */
+const MAX_RANK_BADGE = 3
 
 /**
  * One session on the board: programme name in a pill, time beneath.
@@ -22,7 +31,7 @@ import { evaluateAllocation } from '../domain/eligibility.js'
  */
 export default function ClassPill({ cls, onOpen }) {
   const { rosterFor } = useAllocations()
-  const { dwellEnabled, dwellMs, activeAdmission } = useBoard()
+  const { dwellEnabled, dwellMs, activeAdmission, activePreferences } = useBoard()
   const { setNodeRef, isOver } = useDroppable({ id: classDroppableId(cls.id) })
   const label = programLabel(cls.Program)
 
@@ -32,6 +41,12 @@ export default function ClassPill({ cls, onOpen }) {
     ? evaluateAllocation({ cls, admission: activeAdmission, roster: rosterFor(cls) })
     : null
   const blocked = verdict != null && !verdict.ok
+
+  // Where this class sits in the dragged student's session ranking. Only on
+  // droppable pills: a rank on a refused class would read as an invitation the
+  // drop is about to decline.
+  const rawRank = activeAdmission && !blocked ? preferenceRankFor(activePreferences, cls) : null
+  const rank = rawRank != null && rawRank <= MAX_RANK_BADGE ? rawRank : null
   // Counts the pending roster, so the badge falls the moment a student is
   // un-allocated in the dialog rather than waiting for a save.
   const taken = rosterFor(cls).length
@@ -61,7 +76,9 @@ export default function ClassPill({ cls, onOpen }) {
       className={`relative flex w-full min-w-0 cursor-pointer flex-col items-center gap-1 rounded-full text-left transition-transform ${
         isOver ? 'scale-[1.04]' : 'hover:scale-[1.02] active:scale-[0.99]'
       }`}
-      aria-label={`${cls.Program}, ${cls.Class_Day} ${cls.Class_Time}, ${taken} of ${capacity} seats taken`}
+      aria-label={`${cls.Program}, ${cls.Class_Day} ${cls.Class_Time}, ${taken} of ${capacity} seats taken${
+        rank ? `, their ${ordinal(rank)} preference` : ''
+      }`}
     >
       {/**
        * The seat badge is pinned to the right edge rather than sitting beside
@@ -95,6 +112,23 @@ export default function ClassPill({ cls, onOpen }) {
         }
         title={`${cls.Program} · ${cls.Name}`}
       >
+        {/*
+          Preference rank, shown only mid-drag on classes the drop would accept.
+          Mirrors the seat badge on the other end of the pill — same scrim, same
+          size — so the pill reads as one system: how much they want it on the
+          left, how much room it has on the right.
+        */}
+        {rank != null && (
+          <span
+            className={`shrink-0 rounded-full px-1.5 py-px text-[10px] leading-[1.35] font-semibold ${
+              fill ? '' : 'bg-surface text-subtle'
+            }`}
+            style={fill ? { backgroundColor: badgeBg } : undefined}
+            title={`Their ${ordinal(rank)} session preference`}
+          >
+            {ordinal(rank)}
+          </span>
+        )}
         <span
           className={`min-w-0 flex-1 truncate text-center text-[13px] leading-tight font-semibold ${
             fill ? '' : 'text-fg'
