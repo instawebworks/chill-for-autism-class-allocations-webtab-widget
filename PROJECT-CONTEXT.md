@@ -1,4 +1,4 @@
-# Chill for Autism — Class Allocations widget
+# Chill for Autism  —  Class Allocations widget
 
 Handoff written **4 Aug 2026**, end of the first working session.
 Read this top to bottom before touching anything; several things here are
