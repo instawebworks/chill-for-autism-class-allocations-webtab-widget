@@ -1,4 +1,4 @@
-import { DAYS, startMinutes } from './schedule.js'
+import { formatSlot, parseSlot, startMinutes } from './schedule.js'
 
 /**
  * Session preferences, from the Enrollment's Session_Preference_Order field.
@@ -21,6 +21,21 @@ import { DAYS, startMinutes } from './schedule.js'
  * Everything here is a hint for the person allocating, not a rule: nothing in
  * this module may block an allocation, and an enrolment with no readable
  * preferences simply shows none.
+ *
+ * ---------------------------------------------------------------------------
+ * NOT shown on the waiting cards any more — read this before putting it back
+ * ---------------------------------------------------------------------------
+ *
+ * This list is per ENROLMENT, while a card is per ADMISSION, and one enrolment
+ * produces one admission per programme. Showing `prefs[0]` on a card therefore
+ * printed the same day and time on every programme a family took — which read
+ * as though the widget had assigned them all to one slot. The cards now read
+ * the per-programme Selected Programs List instead; see domain/selectedPrograms.js.
+ *
+ * Kept because the ranking is still real information about what the family
+ * asked for, and is the obvious thing to surface when someone has to place a
+ * student whose enrolled session has no class. It is just no longer allowed to
+ * masquerade as the session they are enrolled in.
  */
 
 /**
@@ -28,20 +43,13 @@ import { DAYS, startMinutes } from './schedule.js'
  *   rank is 1-based — rank 1 is the family's first choice.
  */
 
-/** "Mondays" / "Monday" / "mondays " → "Monday"; anything else → null. */
-function dayOf(line) {
-  const word = String(line).trim().split(/\s+/)[0] ?? ''
-  const singular = word.replace(/s$/i, '').toLowerCase()
-  return DAYS.find((d) => d.toLowerCase() === singular) ?? null
-}
-
 /** Parse one enrolment's ranked slot list. Never throws; [] for blank/null. */
 export function parseSessionPreferences(text) {
   return String(text ?? '')
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((raw, i) => ({ raw, day: dayOf(raw), start: startMinutes(raw), rank: i + 1 }))
+    .map((raw, i) => ({ ...parseSlot(raw), rank: i + 1 }))
 }
 
 /** Parsed preferences for every enrolment that has any, keyed by record id. */
@@ -76,17 +84,14 @@ export function preferenceRankFor(prefs, cls) {
   return (prefs ?? []).find((p) => p.day === day && p.start === start)?.rank ?? null
 }
 
-/** "Tue 10am" / "Wed 2:30pm" — a slot at card size. Falls back to the raw line. */
+/**
+ * "Tue 10am" / "Wed 2:30pm" — a slot at card size.
+ *
+ * Delegates to the shared formatter so a preference and an enrolled session are
+ * never rendered in two different shapes for the same time of day.
+ */
 export function shortSlot(pref) {
-  if (!pref) return null
-  if (pref.day == null || pref.start == null) return pref.raw
-
-  const h24 = Math.floor(pref.start / 60)
-  const mins = pref.start % 60
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
-  const suffix = h24 >= 12 ? 'pm' : 'am'
-  const time = mins > 0 ? `${h12}:${String(mins).padStart(2, '0')}${suffix}` : `${h12}${suffix}`
-  return `${pref.day.slice(0, 3)} ${time}`
+  return formatSlot(pref)
 }
 
 /** The whole ranking as a tooltip: "1. Tuesdays 10am - 12.30pm\n2. …". */

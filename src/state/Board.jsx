@@ -17,11 +17,10 @@ import { useAllocations } from './Allocations.jsx'
 import { colourForProgram, programColours } from '../domain/programs.js'
 import { evaluateAllocation } from '../domain/eligibility.js'
 import {
-  preferencesByEnrollment,
-  preferencesForAdmission,
-  preferenceTitle,
-  shortSlot,
-} from '../domain/preferences.js'
+  enrolledSessionFor,
+  selectedProgramsByEnrollment,
+  shortSession,
+} from '../domain/selectedPrograms.js'
 import AdmissionCard from '../components/AdmissionCard.jsx'
 import { useNotice } from './Notice.jsx'
 
@@ -90,8 +89,8 @@ export function BoardProvider({ children }) {
   const { classes, admissions } = useWorkspace()
   const { allocate, rosterFor } = useAllocations()
   const { notify, dismiss: dismissNotice } = useNotice()
-  // Full term data, not the workspace view: preferences follow the enrolment,
-  // which is not location-scoped.
+  // Full term data, not the workspace view: the selected programmes follow the
+  // enrolment, which is not location-scoped.
   const { enrollments = [] } = useData()
 
   const [openClassId, setOpenClassId] = useState(null)
@@ -220,6 +219,14 @@ export function BoardProvider({ children }) {
     setPointerDrag(false)
   }, [cancelDwell])
 
+  // Declared above tryAllocate because that callback's dependency array reads
+  // it, and a dependency array is evaluated at the moment useCallback runs —
+  // a `const` further down the body is still in its temporal dead zone then.
+  const sessionsByEnrollment = useMemo(
+    () => selectedProgramsByEnrollment(enrollments),
+    [enrollments],
+  )
+
   /**
    * The gate. Nothing is placed without passing it, and a refusal always says
    * why — the card returning on its own is indistinguishable from a fumbled
@@ -228,15 +235,23 @@ export function BoardProvider({ children }) {
   const tryAllocate = useCallback(
     (cls, admissionId) => {
       const admission = admissions.find((a) => a.id === admissionId) ?? null
-      const verdict = evaluateAllocation({ cls, admission, roster: rosterFor(cls) })
+      const session = enrolledSessionFor(admission, sessionsByEnrollment)
+      const verdict = evaluateAllocation({ cls, admission, roster: rosterFor(cls), session })
       if (!verdict.ok) {
         raiseNotice(verdict)
         return false
       }
       allocate(cls, admissionId)
+
+      // Allowed, but worth saying out loud: this is not the session the family
+      // enrolled in, so the placement will not match their invoice. Raised
+      // AFTER the placement, because it is a note on what just happened rather
+      // than a refusal of it — and through notify() rather than raiseNotice(),
+      // so it stays up to be read instead of fading like a rejected drop.
+      if (verdict.advisory) notify(verdict.advisory)
       return true
     },
-    [admissions, allocate, raiseNotice, rosterFor],
+    [admissions, allocate, notify, raiseNotice, rosterFor, sessionsByEnrollment],
   )
 
   const onDragEnd = useCallback(
@@ -269,16 +284,15 @@ export function BoardProvider({ children }) {
     [admissions, activeAdmissionId],
   )
 
-  const prefsByEnrollment = useMemo(() => preferencesByEnrollment(enrollments), [enrollments])
-
   /**
-   * The dragged admission's ranked session preferences, for the pills and the
-   * dialog to judge themselves against. Empty when nothing is dragged or the
-   * enrolment gave none — consumers show nothing rather than guessing.
+   * The session the dragged admission is enrolled in, for the pills and the
+   * dialog to judge themselves against. Null when nothing is dragged, or when
+   * this programme is not on the enrolment's Selected Programs List — consumers
+   * then mark nothing, rather than marking the wrong class.
    */
-  const activePreferences = useMemo(
-    () => preferencesForAdmission(activeAdmission, prefsByEnrollment),
-    [activeAdmission, prefsByEnrollment],
+  const activeSession = useMemo(
+    () => enrolledSessionFor(activeAdmission, sessionsByEnrollment),
+    [activeAdmission, sessionsByEnrollment],
   )
 
   const value = useMemo(
@@ -292,12 +306,12 @@ export function BoardProvider({ children }) {
       isDragging: activeAdmissionId != null,
       activeAdmissionId,
       activeAdmission,
-      activePreferences,
+      activeSession,
       /** Pointer drags spring dialogs open; keyboard drags do not. */
       dwellEnabled: pointerDrag,
       dwellMs: DWELL_MS,
     }),
-    [openClass, activeAdmissionId, activeAdmission, activePreferences, pointerDrag],
+    [openClass, activeAdmissionId, activeAdmission, activeSession, pointerDrag],
   )
 
   return (
@@ -335,8 +349,8 @@ export function BoardProvider({ children }) {
             <AdmissionCard
               admission={activeAdmission}
               colour={colourForProgram(colours, activeAdmission.Program_Name)}
-              preference={shortSlot(activePreferences[0])}
-              preferenceTitle={preferenceTitle(activePreferences)}
+              session={shortSession(activeSession)}
+              sessionTitle={activeSession?.sessionTime ?? null}
             />
           </div>
         ) : null}

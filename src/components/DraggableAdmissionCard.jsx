@@ -14,7 +14,7 @@ import { lookupName } from '../domain/classes.js'
  * would re-flow the queue under the pointer, and the card is not gone yet: the
  * drag can still be cancelled.
  */
-export default function DraggableAdmissionCard({ admission, colour, preference, preferenceTitle }) {
+export default function DraggableAdmissionCard({ admission, colour, session, sessionTitle }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: admissionDraggableId(admission.id),
   })
@@ -39,8 +39,8 @@ export default function DraggableAdmissionCard({ admission, colour, preference, 
       <AdmissionCard
         admission={admission}
         colour={colour}
-        preference={preference}
-        preferenceTitle={preferenceTitle}
+        session={session}
+        sessionTitle={sessionTitle}
       />
     </div>
   )

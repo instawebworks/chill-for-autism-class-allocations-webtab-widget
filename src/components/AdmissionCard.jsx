@@ -12,13 +12,20 @@ import { programLabel } from '../domain/schedule.js'
  * The programme dot borrows its colour from the matching class on the board, so
  * a card and its destination are visibly the same programme.
  *
- * `preference` is the family's first-choice session slot, already shortened
- * ("Tue 10am"); `preferenceTitle` is the whole ranked list, surfaced as the
- * line's tooltip. Both come from the enrolment via domain/preferences.js. The
- * line only renders when there is something to say — a card with no readable
- * preference stays two rows rather than carrying an empty slot.
+ * `session` is the slot this admission's programme is enrolled in, already
+ * shortened ("Mon 2pm"); `sessionTitle` is the full text as written on the
+ * Selected Programs List, surfaced as the line's tooltip. Both come from the
+ * enrolment via domain/selectedPrograms.js.
+ *
+ * This is the family's actual commitment — what the invoice and the service
+ * agreement are written against — and NOT their ranked preference list. The
+ * distinction is the whole point: preferences live on the enrolment, so a
+ * family taking two programmes had the same day and time printed on both
+ * cards. The line only renders when there is something to say; a programme
+ * missing from the Selected Programs List shows no session rather than
+ * borrowing one from elsewhere.
  */
-export default function AdmissionCard({ admission, colour, preference, preferenceTitle }) {
+export default function AdmissionCard({ admission, colour, session, sessionTitle }) {
   const student = lookupName(admission.Student_Name) ?? 'Unnamed student'
   const program = programLabel(admission.Program_Name)
 
@@ -45,10 +52,10 @@ export default function AdmissionCard({ admission, colour, preference, preferenc
         {student}
       </p>
 
-      {preference && (
+      {session && (
         <p
           className="text-subtle mt-1 flex items-center gap-1 text-[10px] leading-none"
-          title={preferenceTitle ? `Session preferences:\n${preferenceTitle}` : undefined}
+          title={sessionTitle ? `Enrolled session: ${sessionTitle}` : undefined}
         >
           <svg
             viewBox="0 0 12 12"
@@ -61,8 +68,11 @@ export default function AdmissionCard({ admission, colour, preference, preferenc
             <circle cx="6" cy="6" r="4.7" />
             <path d="M6 3.6V6l1.7 1.2" strokeLinecap="round" />
           </svg>
+          {/* "Enrolled", not "Prefers". The word is load-bearing: this is the
+              session the family is committed to and invoiced for, and calling
+              it a preference is what let a wrong slot read as merely advisory. */}
           <span className="truncate">
-            Prefers <span className="text-muted font-medium">{preference}</span>
+            Enrolled <span className="text-muted font-medium">{session}</span>
           </span>
         </p>
       )}

@@ -187,6 +187,24 @@ Near-anagrams meaning opposite things. Never reference them outside
 - **A term's year is not its start year.** Term 1 2026 starts 22 Nov **2025**.
 - **`Students.User_Password` is a plain text field.** Do not read, display, or
   transport it. Worth asking what writes to it.
+- **Two session fields on Enrollments mean very different things.** This caused
+  a live client complaint (Sep 2026) and is the easiest mistake in the module:
+
+  | Field | Grain | Means |
+  |---|---|---|
+  | `Session_Preference_Order` | **per enrolment** | ranked wish list, all ten weekly slots |
+  | `Selected_Programs_List` / `..._Data_JSON` | **per programme** | the session actually enrolled in and invoiced |
+
+  One enrolment produces one Admission *per programme*, so reading
+  `Session_Preference_Order[0]` onto an admission prints the same day and time
+  on every programme a family took. 57 of 148 Term 4 admissions displayed a
+  session that was not theirs. Always go through `domain/selectedPrograms.js`.
+
+  `Selected_Programs_Data_JSON` is a **bare JSON array**, not the
+  `{v, count, rows}` envelope `Allocation_Data_JSON` uses. It carries no
+  `admission_id`, and `program_id` is an empty string on every "Chill Plus" row
+  in the live data — so rows are matched by `programKey(program_name)`, never
+  by id.
 
 ### Module chain
 
@@ -273,9 +291,12 @@ parsed and rendered it, and the student left the waiting panel.
 
 - **Header** — "Program Schedule | Term 4 2026", date range, location picker
   (custom accessible listbox, always interactive), brand lockup
-- **Left panel** — "Awaiting Placement": admissions with `Allocated !== true`,
-  compact two-line cards (number + programme on one row, student on the next),
-  scrolls internally
+- **Left panel** — "Awaiting Placement": admissions not in any class roster once
+  pending edits are applied (derived from the rosters, *not* from the
+  `Allocated` flag — the two disagree in live data). Compact cards: number +
+  programme on one row, student on the next, and the **enrolled session**
+  ("Enrolled Mon 2pm") from the Selected Programs List. A programme absent from
+  that list shows no session rather than borrowing one. Scrolls internally
 - **Right panel** — the board: 5 day columns × morning/afternoon, one CSS grid
   so dividing rules align across columns. Pills coloured from
   `Class_Color_Code`, seat badge right-aligned

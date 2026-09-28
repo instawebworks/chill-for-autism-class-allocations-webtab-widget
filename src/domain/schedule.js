@@ -26,6 +26,47 @@ export function startMinutes(timeText) {
   return hour * 60 + mins
 }
 
+/** "Mondays" / "Monday" / "mondays " → "Monday"; anything else → null. */
+function dayOf(line) {
+  const word = String(line).trim().split(/\s+/)[0] ?? ''
+  const singular = word.replace(/s$/i, '').toLowerCase()
+  return DAYS.find((d) => d.toLowerCase() === singular) ?? null
+}
+
+/**
+ * A session slot — a day word plus a start time — read out of free text.
+ *
+ * One parser, two sources that describe the same slots in different hands: the
+ * enrolment form's ranked preference lines ("Mondays 10am - 12.45pm") and the
+ * Selected Programs List's session times ("Mondays 2:00pm - 4:15pm", and in one
+ * case a trailing "(AEDT)"). Plural and singular day names, dot and colon
+ * minute separators, drifting spacing — none of it matters to a human reader
+ * and all of it would break a string comparison, so both sides parse.
+ *
+ * `day`/`start` are null when the text cannot be read; `raw` is kept either
+ * way, because the line still means something to a person even when it means
+ * nothing to the matcher.
+ *
+ * @returns {{ raw: string, day: string|null, start: number|null }}
+ */
+export function parseSlot(text) {
+  const raw = String(text ?? '').trim()
+  return { raw, day: dayOf(raw), start: startMinutes(raw) }
+}
+
+/** "Tue 10am" / "Wed 2:30pm" — a slot at card size. Falls back to the raw text. */
+export function formatSlot(slot) {
+  if (!slot) return null
+  if (slot.day == null || slot.start == null) return slot.raw || null
+
+  const h24 = Math.floor(slot.start / 60)
+  const mins = slot.start % 60
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12
+  const suffix = h24 >= 12 ? 'pm' : 'am'
+  const time = mins > 0 ? `${h12}:${String(mins).padStart(2, '0')}${suffix}` : `${h12}${suffix}`
+  return `${slot.day.slice(0, 3)} ${time}`
+}
+
 /**
  * Morning or afternoon. Class_Type carries this, but it is a picklist that can
  * be left empty, so the start time is used as a fallback rather than dropping

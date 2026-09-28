@@ -1,6 +1,7 @@
 import { capacityOf, lookupName } from './classes.js'
 import { programKey } from './programs.js'
 import { programLabel } from './schedule.js'
+import { sessionMatchesClass } from './selectedPrograms.js'
 
 /**
  * Whether an admission may be placed in a class.
@@ -20,10 +21,14 @@ import { programLabel } from './schedule.js'
  * @param {object}   input.cls        the target class
  * @param {object}   input.admission  the admission being placed
  * @param {Array}    input.roster     the class's roster *including* pending edits
+ * @param {object}   [input.session]  the enrolled session, from the Selected
+ *   Programs List. Optional: omitted, the enrolled-session check is skipped
+ *   entirely rather than assumed to fail.
  * @returns {{ ok: boolean, code: string, tone?: 'info'|'warn'|'danger',
- *             title?: string, detail?: string }}
+ *             title?: string, detail?: string,
+ *             advisory?: { tone: string, title: string, detail: string } }}
  */
-export function evaluateAllocation({ cls, admission, roster = [] }) {
+export function evaluateAllocation({ cls, admission, roster = [], session = null }) {
   if (!cls || !admission) {
     return {
       ok: false,
@@ -78,6 +83,30 @@ export function evaluateAllocation({ cls, admission, roster = [] }) {
       tone: 'warn',
       title: 'Class is full',
       detail: `${classLabel} on ${cls.Class_Day} has all ${capacity} seat${capacity === 1 ? '' : 's'} taken.`,
+    }
+  }
+
+  // Everything past here is allowed. The enrolled session is reported, never
+  // enforced.
+  //
+  // Warned rather than blocked, deliberately. The Selected Programs List and
+  // the schedule genuinely disagree in the live data — three Foundation
+  // students are enrolled for a Monday 2pm session that has no class in Term 4
+  // — and a hard rule would leave exactly those students unplaceable, which is
+  // the one group that most needs placing by hand. The allocator is trusted;
+  // they just should not have to notice the discrepancy on their own.
+  //
+  // Skipped entirely when the session is unknown or unreadable: "we cannot tell"
+  // must not present as "this is wrong".
+  if (session && session.day != null && session.start != null && !sessionMatchesClass(session, cls)) {
+    return {
+      ok: true,
+      code: 'not-enrolled-session',
+      advisory: {
+        tone: 'warn',
+        title: 'Not their enrolled session',
+        detail: `${admission.Name} is enrolled for ${session.sessionTime}. This places ${student} in ${cls.Class_Day} ${cls.Class_Time} instead, which will not match their invoice.`,
+      },
     }
   }
 

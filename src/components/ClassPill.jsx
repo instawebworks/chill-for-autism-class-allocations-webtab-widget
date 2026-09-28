@@ -5,15 +5,7 @@ import { normaliseHex, readableTextOn, withAlpha } from '../domain/colour.js'
 import { useAllocations } from '../state/Allocations.jsx'
 import { classDroppableId, useBoard } from '../state/Board.jsx'
 import { evaluateAllocation } from '../domain/eligibility.js'
-import { ordinal, preferenceRankFor } from '../domain/preferences.js'
-
-/**
- * Rank badges stop here. The enrolment form ranks all ten weekly slots, so
- * past the head of the list a badge stops meaning "they want this one" and
- * starts meaning "this slot exists" — a board where every pill is numbered
- * says nothing.
- */
-const MAX_RANK_BADGE = 3
+import { sessionMatchesClass } from '../domain/selectedPrograms.js'
 
 /**
  * One session on the board: programme name in a pill, time beneath.
@@ -31,7 +23,7 @@ const MAX_RANK_BADGE = 3
  */
 export default function ClassPill({ cls, onOpen }) {
   const { rosterFor } = useAllocations()
-  const { dwellEnabled, dwellMs, activeAdmission, activePreferences } = useBoard()
+  const { dwellEnabled, dwellMs, activeAdmission, activeSession } = useBoard()
   const { setNodeRef, isOver } = useDroppable({ id: classDroppableId(cls.id) })
   const label = programLabel(cls.Program)
 
@@ -42,11 +34,21 @@ export default function ClassPill({ cls, onOpen }) {
     : null
   const blocked = verdict != null && !verdict.ok
 
-  // Where this class sits in the dragged student's session ranking. Only on
-  // droppable pills: a rank on a refused class would read as an invitation the
-  // drop is about to decline.
-  const rawRank = activeAdmission && !blocked ? preferenceRankFor(activePreferences, cls) : null
-  const rank = rawRank != null && rawRank <= MAX_RANK_BADGE ? rawRank : null
+  // Is this the session the family actually enrolled in — the one their invoice
+  // and service agreement name? Exactly one pill on the board can answer yes,
+  // which is what makes it worth marking at all.
+  //
+  // This replaced a preference-rank badge, and the replacement is the point.
+  // The enrolment form ranks all ten weekly slots, so a rank said little: the
+  // student's genuinely chosen session could sit at rank 10 and be badged as an
+  // afterthought. Worse, the ranking is per enrolment, so every programme a
+  // family took scored the same classes identically. "Enrolled in this one" is
+  // both the stronger signal and the true one.
+  //
+  // Only on droppable pills: a mark on a refused class would read as an
+  // invitation the drop is about to decline.
+  const isEnrolledSession =
+    activeAdmission != null && !blocked && sessionMatchesClass(activeSession, cls)
   // Counts the pending roster, so the badge falls the moment a student is
   // un-allocated in the dialog rather than waiting for a save.
   const taken = rosterFor(cls).length
@@ -77,7 +79,7 @@ export default function ClassPill({ cls, onOpen }) {
         isOver ? 'scale-[1.04]' : 'hover:scale-[1.02] active:scale-[0.99]'
       }`}
       aria-label={`${cls.Program}, ${cls.Class_Day} ${cls.Class_Time}, ${taken} of ${capacity} seats taken${
-        rank ? `, their ${ordinal(rank)} preference` : ''
+        isEnrolledSession ? ', their enrolled session' : ''
       }`}
     >
       {/**
@@ -113,20 +115,28 @@ export default function ClassPill({ cls, onOpen }) {
         title={`${cls.Program} · ${cls.Name}`}
       >
         {/*
-          Preference rank, shown only mid-drag on classes the drop would accept.
-          Mirrors the seat badge on the other end of the pill — same scrim, same
-          size — so the pill reads as one system: how much they want it on the
-          left, how much room it has on the right.
+          The enrolled-session mark, shown only mid-drag on classes the drop
+          would accept. Mirrors the seat badge on the other end of the pill —
+          same scrim, same size — so the pill reads as one system: whether this
+          is the right session on the left, how much room it has on the right.
         */}
-        {rank != null && (
+        {isEnrolledSession && (
           <span
-            className={`shrink-0 rounded-full px-1.5 py-px text-[10px] leading-[1.35] font-semibold ${
+            className={`flex shrink-0 items-center rounded-full px-1.5 py-px text-[10px] leading-[1.35] font-semibold ${
               fill ? '' : 'bg-surface text-subtle'
             }`}
             style={fill ? { backgroundColor: badgeBg } : undefined}
-            title={`Their ${ordinal(rank)} session preference`}
+            title="Their enrolled session"
           >
-            {ordinal(rank)}
+            <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" aria-hidden="true">
+              <path
+                d="M2.5 6.2 4.8 8.5 9.5 3.8"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </span>
         )}
         <span

@@ -7,7 +7,7 @@ import { capacityOf, lookupName } from '../domain/classes.js'
 import { programLabel } from '../domain/schedule.js'
 import { shadeForWhiteText } from '../domain/colour.js'
 import { evaluateAllocation } from '../domain/eligibility.js'
-import { ordinal, preferenceRankFor } from '../domain/preferences.js'
+import { sessionMatchesClass } from '../domain/selectedPrograms.js'
 import { useAllocations } from '../state/Allocations.jsx'
 import { DIALOG_DROP_ID, useBoard } from '../state/Board.jsx'
 
@@ -33,7 +33,7 @@ import { DIALOG_DROP_ID, useBoard } from '../state/Board.jsx'
 export default function ClassDialog({ cls, onClose }) {
   const titleId = useId()
   const { deallocate, rosterRowsFor } = useAllocations()
-  const { isDragging, activeAdmission, activePreferences } = useBoard()
+  const { isDragging, activeAdmission, activeSession } = useBoard()
   // The whole panel is the drop target, not just the list: once the dialog has
   // sprung open the user is already moving toward it, and asking them to find a
   // smaller zone inside it would waste the gesture.
@@ -57,12 +57,14 @@ export default function ClassDialog({ cls, onClose }) {
     : null
   const blocked = verdict != null && !verdict.ok
 
-  // Named in the drop zone so the confirmation moment — roster in view, about
-  // to release — also says how much the family wanted this slot. Any rank is
-  // worth stating here: unlike the board, one line about one class is never
-  // noise, and "their 9th preference" is exactly the pause-for-thought a low
-  // rank should cause.
-  const rank = activeAdmission && !blocked ? preferenceRankFor(activePreferences, cls) : null
+  // Stated at the confirmation moment — roster in view, about to release —
+  // because this is the last point at which a wrong session can be caught for
+  // free. Unlike the board, one line about one class is never noise here, so
+  // the mismatch is spelled out with the enrolled session named rather than
+  // merely marked.
+  const enrolled = activeAdmission && !blocked ? sessionMatchesClass(activeSession, cls) : false
+  const offSession =
+    activeAdmission != null && !blocked && !enrolled && activeSession?.sessionTime != null
 
   const removeAll = () => {
     for (const row of rows) {
@@ -182,6 +184,10 @@ export default function ClassDialog({ cls, onClose }) {
           {/* States the verdict up front rather than accepting the drop and
               explaining afterwards. The reason is the rule's own wording, so it
               matches the banner the refusal would raise. */}
+          {/* Three states, and the middle one is deliberately still droppable:
+              an off-session placement is discouraged, not forbidden. It wears
+              warn colours and keeps its release wording, so the drop stays
+              available to someone who means it. */}
           <div
             className={`flex items-center justify-center rounded-xl border border-dashed px-3 py-3 text-center text-[12px] font-medium transition-colors ${
               blocked
@@ -190,16 +196,24 @@ export default function ClassDialog({ cls, onClose }) {
                   : verdict.tone === 'warn'
                     ? 'border-warn/60 bg-warn/10 text-warn'
                     : 'border-line-strong text-muted'
-                : isOver
-                  ? 'border-brand-strong bg-brand/15 text-brand-strong'
-                  : 'border-line-strong text-subtle'
+                : offSession
+                  ? isOver
+                    ? 'border-warn bg-warn/15 text-warn'
+                    : 'border-warn/60 bg-warn/10 text-warn'
+                  : isOver
+                    ? 'border-brand-strong bg-brand/15 text-brand-strong'
+                    : 'border-line-strong text-subtle'
             }`}
           >
             {blocked
               ? verdict.title
-              : `${isOver ? 'Release to allocate' : 'Drop here to allocate'}${
-                  rank ? ` — their ${ordinal(rank)} preference` : ''
-                }`}
+              : offSession
+                ? `${
+                    isOver ? 'Release to allocate anyway' : 'Not their enrolled session'
+                  } — enrolled for ${activeSession.sessionTime}`
+                : `${isOver ? 'Release to allocate' : 'Drop here to allocate'}${
+                    enrolled ? ' — their enrolled session' : ''
+                  }`}
           </div>
         </div>
       )}

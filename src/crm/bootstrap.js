@@ -47,9 +47,21 @@ const CLASS_FIELDS = [
   'Allocation_Data_JSON',
 ]
 
-// Only what the preference display needs. The module carries a lot more
+// Only what the session display needs. The module carries a lot more
 // (signatures, NDIS goals, consents) that the widget has no business reading.
-const ENROLLMENT_FIELDS = ['Name', 'Session_Preference_Order', 'Term']
+//
+// Selected_Programs_Data_JSON is the snapshot of the Selected Programs List
+// subform — the per-programme session each family actually enrolled in, and
+// what the invoice is built from. It is the source the waiting cards read.
+// Session_Preference_Order is the enrolment-level wish list; it is deliberately
+// NOT shown on a card, because one list shared across an enrolment's admissions
+// is what made every programme display the same day and time.
+const ENROLLMENT_FIELDS = [
+  'Name',
+  'Session_Preference_Order',
+  'Selected_Programs_Data_JSON',
+  'Term',
+]
 
 const ADMISSION_FIELDS = [
   'Name',
