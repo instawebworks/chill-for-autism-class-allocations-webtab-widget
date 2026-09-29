@@ -50,16 +50,25 @@ const CLASS_FIELDS = [
 // Only what the session display needs. The module carries a lot more
 // (signatures, NDIS goals, consents) that the widget has no business reading.
 //
-// Selected_Programs_Data_JSON is the snapshot of the Selected Programs List
-// subform — the per-programme session each family actually enrolled in, and
-// what the invoice is built from. It is the source the waiting cards read.
+// Enrolled_Sessions_JSON is a snapshot of the Selected Programs List subform,
+// published by the Enrollments workflow build_Enrolled_Sessions_JSON. Subform
+// rows never come back from getRecords, so a snapshot is the only way to read
+// them in bulk — the same trick Allocation_Data_JSON uses on Classes.
+//
+// NOT Selected_Programs_Data_JSON, which looks like the same thing and is not.
+// That field is written by another process and does not mirror the subform: its
+// core-programme row carries the enrolment form's preference line rather than
+// the selected session, and it is never rebuilt when the subform is corrected
+// by hand. Measured on Term 4 2026, 110 of 180 admissions took their session
+// from one of those rows. It is left untouched for whatever else reads it.
+//
 // Session_Preference_Order is the enrolment-level wish list; it is deliberately
 // NOT shown on a card, because one list shared across an enrolment's admissions
 // is what made every programme display the same day and time.
 const ENROLLMENT_FIELDS = [
   'Name',
   'Session_Preference_Order',
-  'Selected_Programs_Data_JSON',
+  'Enrolled_Sessions_JSON',
   'Term',
 ]
 

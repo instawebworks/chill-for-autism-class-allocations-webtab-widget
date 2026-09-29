@@ -3,7 +3,7 @@ import { programKey } from './programs.js'
 
 /**
  * The sessions a family actually enrolled in, from the Enrollment's
- * Selected_Programs_Data_JSON.
+ * Enrolled_Sessions_JSON.
  *
  * ---------------------------------------------------------------------------
  * Why this exists, and what it replaced
@@ -13,42 +13,66 @@ import { programKey } from './programs.js'
  * That field is the enrolment form's ranked wish list and it lives on the
  * ENROLMENT — one list, shared by every Admission the enrolment produced. A
  * family taking Plus and Mindfulness therefore saw the same day and time on both
- * cards, because both were reading line one of the same list. Measured against
- * live Term 4 data, 57 of 148 admissions displayed a session that was not the
- * one they were enrolled and invoiced for.
+ * cards, because both were reading line one of the same list.
  *
  * The Selected Programs List is the right source: it is per programme, it is
  * what the invoice and service agreement are built from, and it is a commitment
- * rather than a preference. `Selected_Programs_Data_JSON` is a snapshot of that
- * subform published into a text field — the same trick `Allocation_Data_JSON`
- * uses on Classes, and for the same reason: subform rows never come back from
- * getRecords, so the snapshot is the only way to read them in bulk.
+ * rather than a preference. It is also the list the client reads in CRM and
+ * checks this widget against, which makes it the definition of correct:
+ *
+ *   the session on a card must equal the Session Time to Enroll on that
+ *   admission's row of the enrolment's Selected Programs List.
+ *
+ * ---------------------------------------------------------------------------
+ * Why a snapshot field, and why NOT Selected_Programs_Data_JSON
+ * ---------------------------------------------------------------------------
+ *
+ * Subform rows never come back from getRecords, so they cannot be read in bulk;
+ * the Enrollments workflow publishes a snapshot into a text field instead. Same
+ * trick Allocation_Data_JSON uses on Classes, same reason. The publisher is
+ * version-controlled at deluge/build_Enrolled_Sessions_JSON.dg and mirrors the
+ * subform verbatim.
+ *
+ * `Selected_Programs_Data_JSON` is a different field that looks like this one
+ * and must not be used. It is written by another process and does not mirror
+ * the subform: its core-programme row (Plus / Foundation) carries the enrolment
+ * form's preference line rather than the selected session, and it is never
+ * rebuilt when the subform is corrected. Audited on Term 4 2026 — of its 111
+ * rows with a blank program_id, 105 are character-identical to
+ * Session_Preference_Order line 1 and 110 carry that list's "12.45pm" dot
+ * formatting, while none of the 77 rows with a real program_id do either. It is
+ * left in place untouched for whatever else reads it.
  *
  * ---------------------------------------------------------------------------
  * Shape
  * ---------------------------------------------------------------------------
  *
- *   [ { "program_id":    "31531000000062020",
- *       "program_name":  "Chill Mindfulness",
- *       "session_time":  "Mondays 2:00pm - 4:15pm",
- *       "support_level": "$2,317.77 (standard support)" } ]
+ *   { "v": 1, "count": 1, "rows": [
+ *       { "rowId":        "125966000002409066",
+ *         "admissionNo":  "ADM-00097",
+ *         "programName":  "Chill Plus",
+ *         "sessionTime":  "Tuesdays 10:00am - 12:30pm",
+ *         "supportLevel": "$2,648.88 (standard support)" } ] }
  *
- * A bare array, NOT the `{v, count, rows}` envelope the class roster uses. There
- * is no version marker to read, so nothing here may assume one.
- *
- * Matching is by `program_name` through `programKey`, never by `program_id`:
- * the id is an empty string on every "Chill Plus" row in the live data, so it
- * cannot be relied on to identify anything.
+ * `admissionNo` is the subform's "Admission ID" column — note that its CRM API
+ * name is `Session_Date_Time`, a rename that kept its original API name. The
+ * Deluge function deals with that; nothing here needs to know.
  *
  * Everything is defensive. The field is plain text written by an external
  * process and can be null, truncated, hand-edited, or newer than this build.
  * None of that may throw during render.
+ *
+ * Export names are unchanged from the version that read the old field, so the
+ * two components consuming this module did not have to be touched.
  */
+
+export const SESSIONS_VERSION = 1
 
 /**
  * @typedef {{
- *   programName: string|null, key: string, sessionTime: string|null,
- *   day: string|null, start: number|null, supportLevel: string|null,
+ *   rowId: string|null, admissionNo: string|null, programName: string|null,
+ *   key: string, sessionTime: string|null, day: string|null,
+ *   start: number|null, supportLevel: string|null,
  * }} EnrolledSession
  *
  * status:
@@ -67,22 +91,25 @@ function str(value) {
 }
 
 function normaliseRow(row) {
-  const sessionTime = str(row?.session_time)
+  const sessionTime = str(row?.sessionTime)
   const slot = sessionTime ? parseSlot(sessionTime) : null
 
   return {
-    programName: str(row?.program_name),
-    key: programKey(row?.program_name),
+    rowId: str(row?.rowId),
+    admissionNo: str(row?.admissionNo),
+    programName: str(row?.programName),
+    key: programKey(row?.programName),
     sessionTime,
     day: slot?.day ?? null,
     start: slot?.start ?? null,
-    supportLevel: str(row?.support_level),
+    supportLevel: str(row?.supportLevel),
   }
 }
 
-/** Parse one Enrollment's selected-programmes snapshot. Never throws. */
+/** Parse one Enrollment's session snapshot. Never throws. */
 export function parseSelectedPrograms(enrollment) {
-  const raw = enrollment?.Selected_Programs_Data_JSON
+  const raw = enrollment?.Enrolled_Sessions_JSON
+  const label = enrollment?.Name ?? enrollment?.id
 
   if (raw == null || String(raw).trim() === '') {
     return { status: 'missing', rows: [] }
@@ -92,22 +119,44 @@ export function parseSelectedPrograms(enrollment) {
   try {
     data = JSON.parse(raw)
   } catch {
-    console.warn(
-      `[selected-programs] ${enrollment?.Name ?? enrollment?.id}: Selected_Programs_Data_JSON is not valid JSON.`,
-    )
+    console.warn(`[sessions] ${label}: Enrolled_Sessions_JSON is not valid JSON.`)
     return { status: 'invalid', rows: [] }
   }
 
-  if (!Array.isArray(data)) {
-    console.warn(
-      `[selected-programs] ${enrollment?.Name ?? enrollment?.id}: Selected_Programs_Data_JSON is not an array.`,
-    )
+  // A bare array is tolerated as well as the envelope. It costs two lines and
+  // means a snapshot written by an older or hand-rolled pass still reads,
+  // rather than blanking every card on the board.
+  const list = Array.isArray(data) ? data : data?.rows
+  if (!Array.isArray(list)) {
+    console.warn(`[sessions] ${label}: Enrolled_Sessions_JSON has no rows array.`)
     return { status: 'invalid', rows: [] }
   }
 
-  // A row with no programme name cannot be matched to an admission, so it is
-  // dropped rather than kept as an entry nothing can ever look up.
-  const rows = data.map(normaliseRow).filter((r) => r.key !== '')
+  const version = Number(data?.v) || null
+  if (version && version > SESSIONS_VERSION) {
+    // Tolerated rather than rejected: unknown keys are ignored and the known
+    // ones still read, so a schema bump does not blank the board until the
+    // widget is redeployed.
+    console.info(
+      `[sessions] ${label}: snapshot v${version} is newer than v${SESSIONS_VERSION}; reading known fields only.`,
+    )
+  }
+
+  const declaredCount = Number.isFinite(Number(data?.count)) ? Number(data.count) : null
+  if (declaredCount != null && declaredCount !== list.length) {
+    // Written by the same pass that wrote the rows, so a mismatch means the
+    // snapshot was truncated or hand-edited. The rows are still the better
+    // answer, so this is reported rather than acted on.
+    console.warn(
+      `[sessions] ${label}: count says ${declaredCount} but ${list.length} rows are present.`,
+    )
+  }
+
+  // A row with neither an admission number nor a readable programme name can
+  // never be matched to a card, so it is dropped rather than kept as an entry
+  // nothing will ever look up. The snapshot deliberately keeps such rows — the
+  // count has to agree with the subform — but they are of no use here.
+  const rows = list.map(normaliseRow).filter((r) => r.admissionNo != null || r.key !== '')
 
   return { status: rows.length > 0 ? 'ok' : 'empty', rows }
 }
@@ -123,7 +172,17 @@ export function selectedProgramsByEnrollment(enrollments = []) {
 }
 
 /**
- * The session behind one admission, via its Enrollment lookup and programme.
+ * The session behind one admission, via its Enrollment lookup.
+ *
+ * Matched on the admission number first, because the subform carries it and it
+ * is an exact identity — ADM-00097 is that admission and no other. That is
+ * strictly better than the programme-name match it replaced, which had to
+ * survive three separate spelling conventions between the two modules (see
+ * programKey) and could only ever be as good as those rules.
+ *
+ * The programme-name match is kept as a fallback for rows whose Admission ID
+ * column was never filled in, which is the state every row predating that
+ * column is in.
  *
  * Null when the admission has no enrolment link, the enrolment listed no
  * programmes, or — and this one is real in the live data — the admission is for
@@ -138,6 +197,12 @@ export function enrolledSessionFor(admission, byEnrollment) {
 
   const rows = byEnrollment?.get(id)
   if (!rows) return null
+
+  const admissionNo = str(admission?.Name)
+  if (admissionNo) {
+    const exact = rows.find((row) => row.admissionNo === admissionNo)
+    if (exact) return exact
+  }
 
   const want = programKey(admission?.Program_Name)
   if (!want) return null

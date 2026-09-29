@@ -49,6 +49,46 @@ void automation.build_Class_Code_And_Allocations(Int classId)
 		// program: "C" + first 3 letters after the first word, upper-cased.
 		programCode = "";
 		program = ifnull(cls.get("Program"),"").toString().trim();
+		/*
+		 * The instance marker has to come out before the code is built, and go
+		 * back on at the end.
+		 *
+		 * A programme can run twice in the same slot, and CRM spells that two
+		 * different ways: a numeric PREFIX ("02_Chill Plus") or a numeric SUFFIX
+		 * ("Chill No Problem_02"). Neither survives into the code below, so both
+		 * sessions computed the SAME code — and Name is a unique field, so the
+		 * second one's update was rejected outright.
+		 *
+		 * That is not a cosmetic failure. Name used to share an update map with
+		 * Seats_Allocated and Allocation_Data_JSON, so one rejected rename threw
+		 * away the roster snapshot too, and the widget — which can only read
+		 * allocations through that snapshot — saw the class as permanently empty.
+		 * Students allocated into those five Term 4 classes appeared to save and
+		 * then bounced straight back into the waiting queue.
+		 *
+		 * Instance 01 deliberately produces the same code it always has, so the
+		 * ten existing 01_ classes are not renamed by deploying this.
+		 */
+		// [0-9] rather than \d on purpose: it needs no backslash, so there is no
+		// question of how Deluge's string literal escapes it on the way to the
+		// regex engine.
+		instance = "";
+		if(program.matches("^[0-9]+_.*"))
+		{
+			instance = program.subString(0,program.indexOf("_")).trim();
+			program = program.subString(program.indexOf("_") + 1).trim();
+		}
+		else if(program.matches(".*_[0-9]+$"))
+		{
+			cut = program.lastIndexOf("_");
+			instance = program.subString(cut + 1).trim();
+			program = program.subString(0,cut).trim();
+		}
+		instanceCode = "";
+		if(instance != "" && instance.toLong() > 1)
+		{
+			instanceCode = instance;
+		}
 		if(program != "" && program != NONE)
 		{
 			tail = "";
@@ -144,6 +184,12 @@ void automation.build_Class_Code_And_Allocations(Int classId)
 		{
 			parts.add(timeCode);
 		}
+		// Last segment, so the code still reads programme-site-term-day-time and
+		// the second session of a slot simply carries "-02" on the end.
+		if(instanceCode != "")
+		{
+			parts.add(instanceCode);
+		}
 		classCode = parts.toString("-");
 		// ---------- STEPS 2 & 3: the subform, and the JSON snapshot ----------
 		rows = ifnull(cls.get(SUB_API),List());
@@ -228,11 +274,26 @@ void automation.build_Class_Code_And_Allocations(Int classId)
 		currentCode = ifnull(cls.get("Name"),"").toString().trim();
 		currentSeats = ifnull(cls.get("Seats_Allocated"),-1).toLong();
 		currentJson = ifnull(cls.get(JSON_API),"").toString().trim();
+		/*
+		 * TWO writes, and the split is the point.
+		 *
+		 * Name is a UNIQUE field, so its update can be rejected by the server for
+		 * a reason that has nothing to do with the roster. These all used to
+		 * travel in one map, which meant a rejected Class Code silently took
+		 * Seats_Allocated, the derived subform columns and Allocation_Data_JSON
+		 * down with it — and that snapshot is the only way the widget can read
+		 * allocations at all. The class then looked permanently empty, students
+		 * allocated into it bounced back to the waiting queue, and nothing on
+		 * screen said why.
+		 *
+		 * The roster is what the widget depends on, so it goes first and alone.
+		 * The Class Code is cosmetic by comparison and is allowed to fail on its
+		 * own, loudly, without taking anything with it.
+		 */
+		// Empty trigger list = do not re-fire this rule on our own update.
+		opts = Map();
+		opts.put("trigger",List());
 		upd = Map();
-		if(classCode != "" && classCode != currentCode)
-		{
-			upd.put("Name",classCode);
-		}
 		if(seatsAllocated != currentSeats)
 		{
 			upd.put("Seats_Allocated",seatsAllocated);
@@ -247,15 +308,39 @@ void automation.build_Class_Code_And_Allocations(Int classId)
 		}
 		if(upd.size() > 0)
 		{
-			// Empty trigger list = do not re-fire this rule on our own update.
-			opts = Map();
-			opts.put("trigger",List());
 			updResp = zoho.crm.updateRecord("Classes",classId.toLong(),upd,opts);
-			info "Class " + classId + " -> code '" + classCode + "', seats allocated " + seatsAllocated + ", rows " + newRows.size() + ", json " + newJson.length() + " chars. Update: " + updResp.toString();
+			info "Class " + classId + ": seats allocated " + seatsAllocated + ", rows " + newRows.size() + ", json " + newJson.length() + " chars. Update: " + updResp.toString();
 		}
 		else
 		{
-			info "Class " + classId + ": code '" + currentCode + "', seats allocated " + currentSeats + " — already up to date, nothing written.";
+			info "Class " + classId + ": seats allocated " + currentSeats + " — roster already up to date, nothing written.";
+		}
+		if(classCode != "" && classCode != currentCode)
+		{
+			nameUpd = Map();
+			nameUpd.put("Name",classCode);
+			nameFailed = false;
+			try
+			{
+				nameResp = zoho.crm.updateRecord("Classes",classId.toLong(),nameUpd,opts);
+				if(nameResp == null || nameResp.get("id") == null)
+				{
+					nameFailed = true;
+					// The usual cause is another class already holding this code,
+					// which means two sessions of one programme computed the same
+					// one. Name it plainly — it is a data problem, not a glitch.
+					info "Class " + classId + ": Class Code '" + classCode + "' REJECTED (duplicate, or otherwise refused). The roster above was still written. Response: " + nameResp.toString();
+				}
+			}
+			catch (e)
+			{
+				nameFailed = true;
+				info "Class " + classId + ": Class Code '" + classCode + "' threw: " + e.toString() + ". The roster above was still written.";
+			}
+			if(!nameFailed)
+			{
+				info "Class " + classId + ": code '" + currentCode + "' -> '" + classCode + "'.";
+			}
 		}
 	}
 	else

@@ -1,0 +1,139 @@
+/*
+ * Zoho CRM — standalone function, run by hand.
+ *
+ * One-off backfill of Enrolled_Sessions_JSON for enrolments that already exist.
+ * The workflow function only fires on create/edit, so without this every
+ * enrolment made before it was deployed carries an empty field — and the widget
+ * treats an empty field as "no session known" and shows a blank card.
+ *
+ * ---------------------------------------------------------------------------
+ * Run it once per term, newest-first, and page until `more` comes back false
+ * ---------------------------------------------------------------------------
+ *
+ *   backfill_Enrolled_Sessions_JSON("Term 4 2026", 1)   -> {"more":true,  ...}
+ *   backfill_Enrolled_Sessions_JSON("Term 4 2026", 2)   -> {"more":false, ...}
+ *   backfill_Enrolled_Sessions_JSON("Term 1 2027", 1)   -> ...
+ *
+ * Paged rather than run to exhaustion in one call because each enrolment costs
+ * two API calls — a getRecordById to read the subform and an updateRecord to
+ * write the field — and Deluge caps the integration tasks one execution may
+ * perform. BATCH is set so a single run stays comfortably inside that.
+ *
+ * Term is matched as free text because that is how Enrollments stores it
+ * ("Term 4 2026"). Pass the label exactly as it appears on the record.
+ *
+ * ---------------------------------------------------------------------------
+ * Safe to re-run
+ * ---------------------------------------------------------------------------
+ *
+ * The builder compares before it writes and does nothing when the snapshot
+ * already matches, so running a page twice costs reads and changes nothing. It
+ * writes with trigger:[] so no automation is re-fired by the backfill, and no
+ * Modified_By trail is created on records that did not change.
+ *
+ * ---------------------------------------------------------------------------
+ * Returns
+ * ---------------------------------------------------------------------------
+ *
+ *   { "v":1, "term":"Term 4 2026", "page":1, "seen":50,
+ *     "ok":49, "failed":1, "more":true,
+ *     "failures":[ {"id":"…","message":"…"} ] }
+ */
+string standalone.backfill_Enrolled_Sessions_JSON(String term, Int page)
+{
+	VERSION = 1;
+	// Two API calls per enrolment. Kept well under Deluge's per-execution
+	// integration-task ceiling so one run can never be cut off half way.
+	BATCH = 50;
+	failures = List();
+	okCount = 0;
+	failCount = 0;
+	seen = 0;
+	wantedTerm = ifnull(term,"").toString().trim();
+	pageNo = 1;
+	if(page != null && page > 0)
+	{
+		pageNo = page;
+	}
+	if(wantedTerm == "")
+	{
+		out = Map();
+		out.put("v",VERSION);
+		out.put("error","no term supplied — pass the label exactly as stored, e.g. 'Term 4 2026'");
+		info "backfill_Enrolled_Sessions_JSON: no term supplied.";
+		return out.toString();
+	}
+	fromIdx = ((pageNo - 1) * BATCH) + 1;
+	toIdx = pageNo * BATCH;
+	criteria = "(Term:equals:" + wantedTerm + ")";
+	found = List();
+	searchFailed = false;
+	try
+	{
+		found = zoho.crm.searchRecords("Enrollments",criteria,fromIdx,toIdx);
+	}
+	catch (e)
+	{
+		searchFailed = true;
+	}
+	if(searchFailed)
+	{
+		out = Map();
+		out.put("v",VERSION);
+		out.put("term",wantedTerm);
+		out.put("page",pageNo);
+		out.put("error","search failed for criteria " + criteria);
+		info "backfill_Enrolled_Sessions_JSON: search failed for " + criteria;
+		return out.toString();
+	}
+	found = ifnull(found,List());
+	for each  rec in found
+	{
+		seen = seen + 1;
+		recId = ifnull(rec.get("id"),"").toString().trim();
+		if(recId == "")
+		{
+			failCount = failCount + 1;
+			entry = Map();
+			entry.put("id","");
+			entry.put("message","record returned with no id");
+			failures.add(entry);
+		}
+		else
+		{
+			buildFailed = false;
+			try
+			{
+				automation.build_Enrolled_Sessions_JSON(recId.toLong());
+			}
+			catch (e)
+			{
+				buildFailed = true;
+				entry = Map();
+				entry.put("id",recId);
+				entry.put("message","build threw: " + e.toString());
+				failures.add(entry);
+			}
+			if(buildFailed)
+			{
+				failCount = failCount + 1;
+			}
+			else
+			{
+				okCount = okCount + 1;
+			}
+		}
+	}
+	out = Map();
+	out.put("v",VERSION);
+	out.put("term",wantedTerm);
+	out.put("page",pageNo);
+	out.put("seen",seen);
+	out.put("ok",okCount);
+	out.put("failed",failCount);
+	// A full page means there may be another. An empty or short page is the end.
+	out.put("more",seen == BATCH);
+	out.put("failures",failures);
+	info "backfill_Enrolled_Sessions_JSON: " + wantedTerm + " page " + pageNo + " — " + seen + " seen, " + okCount + " ok, " + failCount + " failed.";
+	return out.toString();
+}

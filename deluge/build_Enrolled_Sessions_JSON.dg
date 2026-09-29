@@ -1,0 +1,124 @@
+/*
+ * Zoho CRM — Enrollments workflow function
+ * Fires on Enrollment create/edit.
+ *
+ * Publishes a JSON snapshot of the Selected Programs List subform into
+ * Enrolled_Sessions_JSON, so the Class Allocations widget can read each
+ * admission's enrolled session.
+ *
+ * ---------------------------------------------------------------------------
+ * Why a snapshot at all
+ * ---------------------------------------------------------------------------
+ *
+ * Subform rows are never returned by getRecords / getAllRecords — only
+ * getRecordById returns them, and the widget would need one round trip per
+ * enrolment (115+ for a single term) to read them directly. The same problem
+ * Classes has, solved the same way: see build_Class_Code_And_Allocations.
+ *
+ * ---------------------------------------------------------------------------
+ * This is a MIRROR, not an interpretation
+ * ---------------------------------------------------------------------------
+ *
+ * Every row is copied verbatim, including rows that look wrong. That is
+ * deliberate and it is the whole point of this function.
+ *
+ * The subform is the client's stated source of truth — they read it in CRM and
+ * check the widget against it — so anything this function "corrects" on the way
+ * past would make the widget disagree with the screen they are validating it
+ * against. Rows are not filtered, reordered, reformatted or repaired here.
+ *
+ * Known upstream defect, deliberately NOT fixed here: the core-programme row
+ * (Chill Plus / Chill Foundation) is written from the enrolment form's
+ * Session_Preference_Order list rather than the session actually selected — it
+ * arrives with the preference list's own "10am - 12.45pm" dot formatting, while
+ * genuinely-selected rows carry "10:00am - 12:30pm". Measured across Term 4
+ * 2026: of 111 such rows, 105 are character-identical to preference line 1.
+ * That belongs to whatever writes the subform. Mirroring it faithfully is what
+ * lets staff fix it by hand in the subform and have the fix actually reach the
+ * widget — which is exactly what does not happen today.
+ *
+ * ---------------------------------------------------------------------------
+ * Shape written to Enrolled_Sessions_JSON
+ * ---------------------------------------------------------------------------
+ *
+ *   {
+ *     "v": 1,
+ *     "count": 2,
+ *     "rows": [
+ *       {
+ *         "rowId":        "<subform row id>",
+ *         "admissionNo":  "ADM-00097",
+ *         "programName":  "Chill Plus",
+ *         "sessionTime":  "Tuesdays 10:00am - 12:30pm",
+ *         "supportLevel": "$2,648.88 (standard support)"
+ *       }
+ *     ]
+ *   }
+ *
+ * An empty subform writes {"v":1,"count":0,"rows":[]} rather than being left
+ * blank, so the widget can tell "nothing selected" from "never populated".
+ *
+ * No timestamp, on purpose: it would differ on every run, so the field would be
+ * rewritten every time the workflow fires even when nothing changed.
+ * Modified_Time on the Enrollment already records when it last changed.
+ */
+void automation.build_Enrolled_Sessions_JSON(Int enrollmentId)
+{
+	SUB_API = "Selected_Programs_List";
+	JSON_API = "Enrolled_Sessions_JSON";
+	JSON_VERSION = 1;
+	/*
+	 * The "Admission ID" column's API name is Session_Date_Time.
+	 *
+	 * The field was created on 24 Jul 2026 as "Session Date Time" and renamed to
+	 * "Admission ID" on 1 Aug; Zoho keeps the original API name through a rename.
+	 * Reading "Admission_ID" returns null and every row silently loses its
+	 * admission link, which is the one field that makes exact matching possible.
+	 * Verified against getFields on the Selected_Programs_List subform module.
+	 * Do not "correct" this.
+	 */
+	ADMISSION_COL = "Session_Date_Time";
+	enr = zoho.crm.getRecordById("Enrollments",enrollmentId.toLong());
+	if(enr != null && !enr.isEmpty())
+	{
+		rows = ifnull(enr.get(SUB_API),List());
+		jsonRows = List();
+		for each  row in rows
+		{
+			jsonRow = Map();
+			jsonRow.put("rowId",ifnull(row.get("id"),"").toString().trim());
+			jsonRow.put("admissionNo",ifnull(row.get(ADMISSION_COL),"").toString().trim());
+			jsonRow.put("programName",ifnull(row.get("Program_Name"),"").toString().trim());
+			jsonRow.put("sessionTime",ifnull(row.get("Session_Time_to_Enroll"),"").toString().trim());
+			jsonRow.put("supportLevel",ifnull(row.get("Required_Support_Level"),"").toString().trim());
+			// Kept even when every identifier is blank. A row the widget cannot
+			// match is still a row the subform holds, and the count has to agree
+			// with what a person sees on screen.
+			jsonRows.add(jsonRow);
+		}
+		snapshot = Map();
+		snapshot.put("v",JSON_VERSION);
+		snapshot.put("count",jsonRows.size());
+		snapshot.put("rows",jsonRows);
+		newJson = snapshot.toString();
+		currentJson = ifnull(enr.get(JSON_API),"").toString().trim();
+		if(newJson != currentJson)
+		{
+			// Empty trigger list = do not re-fire this rule on our own update.
+			opts = Map();
+			opts.put("trigger",List());
+			upd = Map();
+			upd.put(JSON_API,newJson);
+			updResp = zoho.crm.updateRecord("Enrollments",enrollmentId.toLong(),upd,opts);
+			info "Enrollment " + enrollmentId + " -> " + jsonRows.size() + " session row(s), json " + newJson.length() + " chars. Update: " + updResp.toString();
+		}
+		else
+		{
+			info "Enrollment " + enrollmentId + ": " + jsonRows.size() + " session row(s) — already up to date, nothing written.";
+		}
+	}
+	else
+	{
+		info "Enrollment " + enrollmentId + " not readable.";
+	}
+}
